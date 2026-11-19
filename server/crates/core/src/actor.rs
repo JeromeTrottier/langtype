@@ -1,8 +1,7 @@
 //! Who did something, and through which channel (DOMAIN_MODEL §3).
 
-use crate::ids::UserId;
+use crate::ids::{ConnectionId, UserId};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// The origin of an event, changeset or session.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -11,7 +10,7 @@ pub enum Actor {
     /// A person using the dashboard.
     Member { user_id: UserId },
     /// Claude (or another MCP client) acting as a member.
-    Agent { user_id: UserId, connection_id: Uuid },
+    Agent { user_id: UserId, connection_id: ConnectionId },
     /// Effects returned by an engine hook.
     Engine { engine: String },
     /// Imports, migrations, scheduled jobs.

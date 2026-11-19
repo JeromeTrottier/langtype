@@ -2,7 +2,10 @@
 //! references (types, roles, engines, activities, skills, starters, libraries).
 //!
 //! Expression (CEL) type-checking is added in M1 (see docs/FILTERS.md).
+//!
+//! [`load_kit`] runs the same checks and then converts the manifest to a typed [`KitDef`].
 
+use mnemo_core::kit::{FieldType, KitDef};
 use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -42,14 +45,37 @@ pub fn load_manifest(dir: &Path) -> Result<Value, KitError> {
     serde_yaml::from_str(&text).map_err(|source| KitError::Yaml { path, source })
 }
 
+/// Why a kit could not be loaded.
+#[derive(Debug, thiserror::Error)]
+pub enum LoadError {
+    #[error(transparent)]
+    Read(#[from] KitError),
+    #[error("invalid kit ({} problem(s))", .0.len())]
+    Invalid(Vec<Problem>),
+}
+
 /// Validate the kit in `dir`. Returns every problem found (empty = valid).
 pub fn validate_dir(dir: &Path) -> Result<Vec<Problem>, KitError> {
+    Ok(check_and_convert(dir)?.err().unwrap_or_default())
+}
+
+/// Load, validate (schema + references) and convert the kit in `dir`.
+pub fn load_kit(dir: &Path) -> Result<KitDef, LoadError> {
+    check_and_convert(dir)?.map_err(LoadError::Invalid)
+}
+
+/// Schema, then references, then conversion; each step only runs if the previous one passed.
+fn check_and_convert(dir: &Path) -> Result<Result<KitDef, Vec<Problem>>, KitError> {
     let manifest = load_manifest(dir)?;
     let mut problems = validate_schema(&manifest);
     if problems.is_empty() {
         problems.extend(check_references(&manifest, Some(dir)));
     }
-    Ok(problems)
+    if !problems.is_empty() {
+        return Ok(Err(problems));
+    }
+    Ok(KitDef::from_manifest(&manifest)
+        .map_err(|errors| errors.into_iter().map(|e| Problem { at: e.at, message: e.message }).collect()))
 }
 
 /// Check a manifest against the JSON Schema.
@@ -62,29 +88,13 @@ pub fn validate_schema(manifest: &Value) -> Vec<Problem> {
         .collect()
 }
 
-const BASE_TYPES: &[&str] = &["text", "markdown", "int", "float", "bool", "date", "timestamp", "json"];
-
 /// Check that a field type string is well formed and refers to known entity types.
 fn check_field_type(ty: &str, entity_types: &BTreeSet<String>) -> Result<(), String> {
-    let ty = ty.trim();
-    if BASE_TYPES.contains(&ty) {
-        return Ok(());
+    let ty = FieldType::parse(ty).map_err(|e| e.to_string())?;
+    match ty.referenced_types().into_iter().find(|t| !entity_types.contains(*t)) {
+        Some(unknown) => Err(format!("ref to unknown entity type `{unknown}`")),
+        None => Ok(()),
     }
-    if let Some(inner) = ty.strip_prefix("ref(").and_then(|r| r.strip_suffix(')')) {
-        return if entity_types.contains(inner.trim()) {
-            Ok(())
-        } else {
-            Err(format!("ref to unknown entity type `{}`", inner.trim()))
-        };
-    }
-    if let Some(inner) = ty.strip_prefix("list(").and_then(|r| r.strip_suffix(')')) {
-        return check_field_type(inner, entity_types);
-    }
-    if let Some(inner) = ty.strip_prefix("enum[").and_then(|r| r.strip_suffix(']')) {
-        let values: Vec<&str> = inner.split(',').map(str::trim).filter(|v| !v.is_empty()).collect();
-        return if values.is_empty() { Err("enum with no values".into()) } else { Ok(()) };
-    }
-    Err(format!("unknown field type `{ty}`"))
 }
 
 fn field_type(field: &Value) -> Option<&str> {
