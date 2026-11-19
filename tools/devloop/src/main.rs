@@ -1,0 +1,552 @@
+//! devloop: runs Claude Code agents on the `work/tasks` queue while the Mac is on.
+//! See docs/DEVELOPMENT.md.
+
+mod config;
+mod launchd;
+mod outcome;
+mod runner;
+mod schedule;
+mod state;
+mod task;
+
+use anyhow::{Context, bail};
+use chrono::{Local, Utc};
+use clap::{Parser, Subcommand};
+use config::Config;
+use outcome::Outcome;
+use schedule::Action;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+use task::Status;
+use tokio::task::JoinSet;
+
+#[derive(Parser)]
+#[command(name = "devloop", version, about = "Local dispatcher for Claude Code development agents")]
+struct Cli {
+    /// Repository root (default: the git repository containing the current folder).
+    #[arg(long, global = true)]
+    repo: Option<PathBuf>,
+    #[command(subcommand)]
+    command: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// Run the loop (what launchd runs).
+    Run,
+    /// Run one cycle and wait for the agents it started.
+    Once,
+    /// Show tasks, running agents and today's usage.
+    Status,
+    /// Approve proposed tasks (proposed → ready).
+    Approve { ids: Vec<u32> },
+    /// Re-run checks, merge the task branch into the base branch, mark done.
+    Accept { id: u32 },
+    /// Send finished work back with a note (awaiting_human → needs_fix).
+    Reject { id: u32, note: String },
+    /// Stop starting new runs (running agents finish).
+    Pause,
+    /// Resume after `pause`.
+    Resume,
+    /// Stop the loop after running agents finish.
+    Stop,
+    /// Start at login with launchd.
+    Install,
+    /// Remove the launchd agent.
+    Uninstall,
+}
+
+fn log(msg: &str) {
+    println!("{} {msg}", Local::now().format("%Y-%m-%d %H:%M:%S"));
+}
+
+fn find_repo(given: Option<PathBuf>) -> anyhow::Result<PathBuf> {
+    let start = match given {
+        Some(p) => p,
+        None => std::env::current_dir()?,
+    };
+    let root =
+        runner::git(&start, &["rev-parse", "--show-toplevel"]).context("not inside a git repository")?;
+    // The main checkout, not a task worktree.
+    let common = runner::git(&start, &["rev-parse", "--path-format=absolute", "--git-common-dir"])?;
+    let common = PathBuf::from(common);
+    Ok(if common.ends_with(".git") {
+        common.parent().map(Path::to_path_buf).unwrap_or(PathBuf::from(root))
+    } else {
+        PathBuf::from(root)
+    })
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    let repo = find_repo(cli.repo)?;
+    match cli.command {
+        Cmd::Run => run_loop(&repo, false).await,
+        Cmd::Once => run_loop(&repo, true).await,
+        Cmd::Status => status(&repo),
+        Cmd::Approve { ids } => approve(&repo, &ids),
+        Cmd::Accept { id } => accept(&repo, id),
+        Cmd::Reject { id, note } => reject(&repo, id, &note),
+        Cmd::Pause => state::set_flag(&repo, "PAUSE", true),
+        Cmd::Resume => {
+            state::set_flag(&repo, "PAUSE", false)?;
+            let mut s = state::load_state(&repo);
+            s.paused_until = None;
+            state::save_state(&repo, &s)
+        }
+        Cmd::Stop => state::set_flag(&repo, "STOP", true),
+        Cmd::Install => {
+            let path = launchd::install(&repo)?;
+            println!("installed {}; devloop now starts at login", path.display());
+            Ok(())
+        }
+        Cmd::Uninstall => launchd::uninstall(),
+    }
+}
+
+// ---- the loop ----------------------------------------------------------------
+
+struct Lock(PathBuf);
+
+impl Drop for Lock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+fn acquire_lock(repo: &Path) -> anyhow::Result<Lock> {
+    let path = state::dir(repo).join("devloop.pid");
+    if let Ok(pid) = std::fs::read_to_string(&path) {
+        let alive = std::process::Command::new("kill")
+            .args(["-0", pid.trim()])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if alive {
+            bail!("devloop is already running (pid {})", pid.trim());
+        }
+    }
+    std::fs::create_dir_all(state::dir(repo))?;
+    std::fs::write(&path, std::process::id().to_string())?;
+    Ok(Lock(path))
+}
+
+type Finished = (Action, Outcome, PathBuf);
+
+async fn run_loop(repo: &Path, once: bool) -> anyhow::Result<()> {
+    let _lock = acquire_lock(repo)?;
+    state::set_flag(repo, "STOP", false)?;
+    log(&format!("devloop started for {}", repo.display()));
+    let mut running: JoinSet<Finished> = JoinSet::new();
+    let mut busy: HashSet<u32> = HashSet::new();
+    let mut planner_running = false;
+    let mut runs: Vec<state::Running> = Vec::new();
+
+    loop {
+        let config = Config::load(repo)?;
+
+        // Reap finished agents.
+        while let Some(done) = running.try_join_next() {
+            match done {
+                Ok((action, outcome, log_path)) => {
+                    if let Some(id) = action.task_id() {
+                        busy.remove(&id);
+                    } else {
+                        planner_running = false;
+                    }
+                    runs.retain(|r| r.role != action.role() || r.target != target_of(&action));
+                    if let Err(e) = apply_outcome(repo, &config, &action, outcome, &log_path) {
+                        log(&format!("error applying outcome of {action:?}: {e:#}"));
+                    }
+                }
+                Err(e) => log(&format!("agent task panicked: {e}")),
+            }
+        }
+
+        let stopping = state::stop_requested(repo);
+        if stopping && running.is_empty() {
+            log("stop requested; exiting");
+            break;
+        }
+
+        let started = if stopping {
+            0
+        } else {
+            start_work(repo, &config, &mut running, &mut busy, &mut planner_running, &mut runs)?
+        };
+
+        let mut s = state::load_state(repo);
+        s.running = runs.clone();
+        s.last_cycle = Some(Utc::now());
+        state::save_state(repo, &s)?;
+
+        if once {
+            if started == 0 && running.is_empty() {
+                break;
+            }
+            if let Some(done) = running.join_next().await {
+                // Put it back through the reaping path on the next iteration.
+                let (action, outcome, path) = done?;
+                if let Some(id) = action.task_id() {
+                    busy.remove(&id);
+                } else {
+                    planner_running = false;
+                }
+                runs.retain(|r| r.role != action.role() || r.target != target_of(&action));
+                apply_outcome(repo, &config, &action, outcome, &path)?;
+            }
+            if running.is_empty() {
+                break;
+            }
+            continue;
+        }
+
+        tokio::time::sleep(Duration::from_secs(config.poll_seconds.max(10))).await;
+    }
+    let mut s = state::load_state(repo);
+    s.running.clear();
+    state::save_state(repo, &s)?;
+    Ok(())
+}
+
+fn target_of(action: &Action) -> String {
+    match action {
+        Action::Plan(m) => format!("plan {m}"),
+        other => format!("#{}", other.task_id().unwrap_or_default()),
+    }
+}
+
+/// Why no new run may start right now, if any.
+fn blocked_reason(repo: &Path, config: &Config) -> Option<String> {
+    if state::pause_requested(repo) {
+        return Some("paused".into());
+    }
+    if let Some(until) = state::load_state(repo).paused_until
+        && until > Utc::now()
+    {
+        return Some(format!("usage limit; resuming at {}", until.with_timezone(&Local).format("%H:%M")));
+    }
+    if config.is_quiet(Local::now().time()) {
+        return Some("quiet hours".into());
+    }
+    let today = state::load_usage(repo, &state::today());
+    if today.runs >= config.max_runs_per_day {
+        return Some(format!("daily run budget reached ({})", config.max_runs_per_day));
+    }
+    if config.max_tokens_per_day > 0 && today.tokens() >= config.max_tokens_per_day {
+        return Some(format!("daily token budget reached ({})", config.max_tokens_per_day));
+    }
+    None
+}
+
+fn start_work(
+    repo: &Path,
+    config: &Config,
+    running: &mut JoinSet<Finished>,
+    busy: &mut HashSet<u32>,
+    planner_running: &mut bool,
+    runs: &mut Vec<state::Running>,
+) -> anyhow::Result<usize> {
+    let mut tasks = task::load_all(repo)?;
+
+    for id in schedule::exhausted(&tasks, config.max_fix_attempts) {
+        if let Some(t) = tasks.iter_mut().find(|t| t.meta.id == id) {
+            t.meta.status = Status::Blocked;
+            t.log(&format!("blocked: {} fix attempts used", config.max_fix_attempts));
+            t.save()?;
+            runner::notify(&format!("Task #{id} blocked after {} fix attempts", config.max_fix_attempts));
+        }
+    }
+
+    if let Some(reason) = blocked_reason(repo, config) {
+        log(&format!("not starting new runs: {reason}"));
+        return Ok(0);
+    }
+
+    let slots = config.max_concurrent.saturating_sub(running.len());
+    let actions = schedule::next_actions(&schedule::Inputs {
+        tasks: &tasks,
+        busy,
+        planner_running: *planner_running,
+        slots,
+        milestone: &config.current_milestone,
+        max_fix_attempts: config.max_fix_attempts,
+    });
+
+    let mut started = 0;
+    for action in actions {
+        let (cwd, task_path) = match &action {
+            Action::Plan(_) => (repo.to_path_buf(), None),
+            other => {
+                let id = other.task_id().expect("task action");
+                let t = tasks.iter_mut().find(|t| t.meta.id == id).expect("task exists");
+                let cwd = match runner::ensure_worktree(repo, config, t) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        t.meta.status = Status::Blocked;
+                        t.log(&format!("blocked: could not prepare worktree: {e:#}"));
+                        t.save()?;
+                        runner::notify(&format!("Task #{id} blocked: worktree error"));
+                        continue;
+                    }
+                };
+                match other {
+                    Action::Implement(_) => t.meta.status = Status::InProgress,
+                    Action::Fix(_) => {
+                        t.meta.status = Status::InProgress;
+                        t.meta.attempts += 1;
+                    }
+                    _ => {}
+                }
+                t.log(&format!("{} started", other.role()));
+                t.save()?;
+                busy.insert(id);
+                (cwd, Some(t.path.clone()))
+            }
+        };
+        if matches!(action, Action::Plan(_)) {
+            *planner_running = true;
+        }
+        log(&format!("starting {} for {}", action.role(), target_of(&action)));
+        runs.push(state::Running {
+            role: action.role().into(),
+            target: target_of(&action),
+            started_at: Utc::now(),
+        });
+        let (repo, config, action2) = (repo.to_path_buf(), config.clone(), action.clone());
+        running.spawn(async move {
+            let (outcome, path) =
+                runner::run_agent(&repo, &config, &action2, &cwd, task_path.as_deref()).await;
+            (action2, outcome, path)
+        });
+        started += 1;
+    }
+    Ok(started)
+}
+
+/// Update the task (and loop state) from a finished run.
+fn apply_outcome(
+    repo: &Path,
+    config: &Config,
+    action: &Action,
+    outcome: Outcome,
+    log_path: &Path,
+) -> anyhow::Result<()> {
+    let run_log = log_path.strip_prefix(repo).unwrap_or(log_path).display().to_string();
+
+    if let Outcome::UsageLimit { resume_at } = &outcome {
+        let mut s = state::load_state(repo);
+        s.paused_until = Some(*resume_at);
+        state::save_state(repo, &s)?;
+        runner::notify(&format!(
+            "Claude usage limit reached; pausing until {}",
+            resume_at.with_timezone(&Local).format("%H:%M")
+        ));
+        if let Some(id) = action.task_id() {
+            let mut t = task::find(repo, id)?;
+            match action {
+                Action::Implement(_) => t.meta.status = Status::Ready,
+                Action::Fix(_) => {
+                    t.meta.status = Status::NeedsFix;
+                    t.meta.attempts = t.meta.attempts.saturating_sub(1);
+                }
+                _ => {}
+            }
+            t.log(&format!("{} interrupted by the usage limit; will retry", action.role()));
+            t.save()?;
+        }
+        return Ok(());
+    }
+
+    let usage = match &outcome {
+        Outcome::Reported { usage, .. } | Outcome::NoReport { usage, .. } | Outcome::Failed { usage, .. } => {
+            usage.clone()
+        }
+        Outcome::UsageLimit { .. } => unreachable!(),
+    };
+    let today = state::record_usage(repo, &usage)?;
+    log(&format!(
+        "{} for {} finished ({} tokens; today {} runs, {} tokens)",
+        action.role(),
+        target_of(action),
+        usage.tokens(),
+        today.runs,
+        today.tokens()
+    ));
+
+    let Some(id) = action.task_id() else {
+        let proposed = task::load_all(repo)?.iter().filter(|t| t.meta.status == Status::Proposed).count();
+        match outcome {
+            Outcome::Reported { reported, .. } => {
+                runner::notify(&format!("Planner: {} ({proposed} tasks to approve)", reported.summary))
+            }
+            _ => runner::notify(&format!(
+                "Planner finished without a report; {proposed} tasks proposed. Log: {run_log}"
+            )),
+        }
+        return Ok(());
+    };
+
+    let mut t = task::find(repo, id)?;
+    let allowed: &[Status] = match action {
+        Action::Review(_) => &[Status::AwaitingHuman, Status::NeedsFix, Status::Blocked],
+        _ => &[Status::AgentReview, Status::Blocked],
+    };
+    match outcome {
+        Outcome::Reported { reported, .. } => {
+            let wanted =
+                serde_yaml::from_str::<Status>(&reported.status).ok().filter(|s| allowed.contains(s));
+            let status = wanted.unwrap_or(Status::Blocked);
+            t.meta.status = status;
+            let mut entry = format!("{} → {}: {}", action.role(), status.as_str(), reported.summary);
+            if wanted.is_none() {
+                entry.push_str(&format!(
+                    " (reported status `{}` not allowed for {})",
+                    reported.status,
+                    action.role()
+                ));
+            }
+            for f in &reported.findings {
+                entry.push_str(&format!("\n  - {f}"));
+            }
+            entry.push_str(&format!(" [{run_log}]"));
+            t.log(&entry);
+        }
+        Outcome::NoReport { message, .. } => {
+            t.meta.status = Status::Blocked;
+            t.log(&format!(
+                "{} finished without a DEVLOOP_RESULT line: {message} [{run_log}]",
+                action.role()
+            ));
+        }
+        Outcome::Failed { message, .. } => {
+            t.meta.status = Status::Blocked;
+            t.log(&format!("{} failed: {message} [{run_log}]", action.role()));
+        }
+        Outcome::UsageLimit { .. } => unreachable!(),
+    }
+    t.save()?;
+    match t.meta.status {
+        Status::AwaitingHuman => {
+            runner::notify(&format!("Task #{id} is ready for your review: {}", t.meta.title))
+        }
+        Status::Blocked => runner::notify(&format!("Task #{id} is blocked: {}", t.meta.title)),
+        _ => {}
+    }
+    let _ = config;
+    Ok(())
+}
+
+// ---- commands -----------------------------------------------------------------
+
+fn status(repo: &Path) -> anyhow::Result<()> {
+    let config = Config::load(repo)?;
+    let tasks = task::load_all(repo)?;
+    let s = state::load_state(repo);
+    let today = state::load_usage(repo, &state::today());
+    println!(
+        "milestone {}  ·  today: {} runs, {} tokens, ${:.2}",
+        config.current_milestone,
+        today.runs,
+        today.tokens(),
+        today.cost_usd
+    );
+    if let Some(reason) = blocked_reason(repo, &config) {
+        println!("new runs: on hold ({reason})");
+    }
+    if let Some(at) = s.last_cycle {
+        println!("last cycle: {}", at.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S"));
+    }
+    for r in &s.running {
+        println!(
+            "running: {} {} since {}",
+            r.role,
+            r.target,
+            r.started_at.with_timezone(&Local).format("%H:%M")
+        );
+    }
+    println!();
+    for t in &tasks {
+        let deps = if t.meta.depends_on.is_empty() {
+            String::new()
+        } else {
+            format!("  after {:?}", t.meta.depends_on)
+        };
+        println!(
+            "#{:<4} {:<15} {:<4} {}{deps}",
+            t.meta.id,
+            t.meta.status.as_str(),
+            t.meta.milestone,
+            t.meta.title
+        );
+    }
+    if tasks.is_empty() {
+        println!("(no tasks yet; the planner proposes tasks for {})", config.current_milestone);
+    }
+    Ok(())
+}
+
+fn approve(repo: &Path, ids: &[u32]) -> anyhow::Result<()> {
+    for &id in ids {
+        let mut t = task::find(repo, id)?;
+        if t.meta.status != Status::Proposed {
+            println!("#{id} is {}, not proposed; skipped", t.meta.status.as_str());
+            continue;
+        }
+        t.meta.status = Status::Ready;
+        t.log("approved");
+        t.save()?;
+        println!("#{id} ready");
+    }
+    Ok(())
+}
+
+fn reject(repo: &Path, id: u32, note: &str) -> anyhow::Result<()> {
+    let mut t = task::find(repo, id)?;
+    if !matches!(t.meta.status, Status::AwaitingHuman | Status::Blocked) {
+        bail!("#{id} is {}; only awaiting_human or blocked tasks can be sent back", t.meta.status.as_str());
+    }
+    t.meta.status = Status::NeedsFix;
+    t.meta.attempts = 0;
+    t.log(&format!("sent back by you: {note}"));
+    t.save()?;
+    println!("#{id} needs_fix");
+    Ok(())
+}
+
+fn accept(repo: &Path, id: u32) -> anyhow::Result<()> {
+    let config = Config::load(repo)?;
+    let mut t = task::find(repo, id)?;
+    if t.meta.status != Status::AwaitingHuman {
+        bail!("#{id} is {}, not awaiting_human", t.meta.status.as_str());
+    }
+    let branch = t.meta.branch.clone().context("task has no branch")?;
+    let current = runner::git(repo, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    if current != config.base_branch {
+        bail!("the main checkout is on `{current}`; switch to `{}` first", config.base_branch);
+    }
+    let worktree = runner::worktree_path(repo, &config, &t);
+    if worktree.exists() && !config.check_command.trim().is_empty() {
+        println!("running `{}` in {}", config.check_command, worktree.display());
+        let ok = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&config.check_command)
+            .current_dir(&worktree)
+            .status()?
+            .success();
+        if !ok {
+            bail!("checks failed on {branch}; not merging");
+        }
+    }
+    runner::git(repo, &["merge", "--no-ff", &branch, "-m", &format!("Merge task #{id}: {}", t.meta.title)])?;
+    if worktree.exists() {
+        runner::git(repo, &["worktree", "remove", &worktree.to_string_lossy()])?;
+    }
+    t.meta.status = Status::Done;
+    t.log(&format!("accepted and merged into {}", config.base_branch));
+    t.save()?;
+    println!("#{id} merged into {} and marked done", config.base_branch);
+    Ok(())
+}

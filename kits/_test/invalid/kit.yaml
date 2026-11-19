@@ -1,0 +1,15 @@
+# Deliberately invalid: unknown field type reference, unknown role, unknown setup skill.
+id: "@test/invalid"
+version: 0.1.0
+name: Invalid test kit
+license: CC-BY-4.0
+requires: { platform: ">=0.1", engine-api: "^1" }
+roles: [gm]
+entities:
+  npc:
+    fields:
+      faction: ref(faction)
+    visibility: { roles: [player] }
+setup:
+  skill: missing-skill
+skills: []

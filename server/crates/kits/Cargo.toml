@@ -1,0 +1,15 @@
+[package]
+name = "mnemo-kits"
+description = "Kit manifests: parsing and validation (schema + references)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+jsonschema.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

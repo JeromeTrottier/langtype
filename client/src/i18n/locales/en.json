@@ -1,0 +1,23 @@
+{
+  "app": {
+    "name": "Mnemo",
+    "tagline": "Claude remembers your project, and you can see what it remembers."
+  },
+  "nav": {
+    "spaces": "Spaces",
+    "settings": "Settings"
+  },
+  "spaces": {
+    "title": "Your spaces",
+    "empty": "No spaces yet. Pick a template to start.",
+    "newSpace": "New space"
+  },
+  "server": {
+    "checking": "Connecting to the local server…",
+    "ok": "Local server connected (v{{version}})",
+    "down": "The local server isn't running. Start it with `just dev`."
+  },
+  "settings": {
+    "title": "Settings"
+  }
+}

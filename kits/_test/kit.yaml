@@ -1,0 +1,71 @@
+# Minimal kit used by tests. Exercises every top-level section of the kit format.
+id: "@test/minimal"
+version: 0.1.0
+name: Minimal test kit
+description: A tiny kit for validator and runtime tests.
+license: CC-BY-4.0
+requires:
+  platform: ">=0.1 <1.0"
+  engine-api: "^1"
+  engines: { counters: "^1" }
+extends: null
+roles: [owner_only, guest]
+
+settings:
+  session_length: { type: int, default: 15, description: Minutes per session }
+
+entities:
+  note:
+    fields:
+      title: { type: text, required: true }
+      body: markdown
+    title_field: title
+    lifecycle: note
+    dedupe_on: [title]
+  thread:
+    fields:
+      title: { type: text, required: true }
+    lifecycle: thread
+  counter:
+    fields:
+      name: { type: text, required: true }
+      value: int
+    visibility: { roles: [owner_only] }
+
+relations:
+  about:
+    from: note
+    to: counter
+    cardinality: many_to_many
+
+events:
+  counter_changed: { class: story, payload: { delta: int } }
+  note_reviewed: { class: evidence }
+
+engines:
+  counters: { track: [counter.value] }
+
+activities:
+  bump:
+    title: Bump a counter
+    engine: counters
+    presenter: log_form
+    map:
+      targets: { type: counter, where: "entity.data.value < 100", limit: 5 }
+    grading: none
+
+primary_actions: [ { activity: bump, label: "Bump" } ]
+
+briefing:
+  owner_only: [last_recap, open_threads]
+  guest: [last_recap]
+
+tools: []
+views: [notes_table]
+
+setup:
+  skill: test-setup
+  starters: []
+  libraries: []
+
+skills: [test-setup]

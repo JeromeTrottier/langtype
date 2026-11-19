@@ -1,0 +1,8 @@
+/target
+/data
+/.devloop
+.env
+.DS_Store
+client/node_modules
+client/dist
+*.tmp

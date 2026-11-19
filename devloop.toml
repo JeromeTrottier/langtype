@@ -1,0 +1,16 @@
+# devloop configuration (docs/DEVELOPMENT.md §4). Read at every cycle, so edits apply live.
+
+claude_bin = "claude"          # Claude Code CLI on PATH (or an absolute path)
+base_branch = "main"           # agents branch from here; `devloop accept` merges here
+current_milestone = "M1"       # the planner proposes tasks for this milestone
+worktrees_dir = "../langtype-worktrees"
+check_command = "just check"   # run by `devloop accept` before merging
+
+max_concurrent = 2
+max_runs_per_day = 40
+max_tokens_per_day = 0         # 0 = no cap (Claude's own usage limit still pauses the loop)
+max_turns_per_run = 80
+run_timeout_minutes = 60
+max_fix_attempts = 3
+poll_seconds = 120
+quiet_hours = []               # e.g. ["09:00-17:00"]: no new runs during these local times

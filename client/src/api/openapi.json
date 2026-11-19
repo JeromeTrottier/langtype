@@ -1,0 +1,116 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Mnemo API",
+    "description": "Structured memory for Claude agents.",
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "tags": [],
+        "summary": "Server health. Public: needs no token.",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/whoami": {
+      "get": {
+        "tags": [],
+        "summary": "The identity the request acts as. Requires the local token.",
+        "operationId": "whoami",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WhoAmI"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          }
+        },
+        "security": [
+          {
+            "local_token": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "schema_version"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Database schema version this build expects.",
+            "minimum": 0
+          },
+          "status": {
+            "type": "string",
+            "description": "Always \"ok\" when the server is up."
+          },
+          "version": {
+            "type": "string",
+            "description": "Server version."
+          }
+        }
+      },
+      "WhoAmI": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "workspace_id",
+          "auth_mode"
+        ],
+        "properties": {
+          "auth_mode": {
+            "type": "string",
+            "description": "\"local\" in local mode."
+          },
+          "user_id": {
+            "type": "string",
+            "description": "The local user's id."
+          },
+          "workspace_id": {
+            "type": "string",
+            "description": "The local user's personal workspace id."
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "local_token": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mnemo.dev/schemas/kit.schema.json",
+  "title": "Mnemo kit manifest (kit.yaml)",
+  "description": "The contract for kits. See docs/PLAN.md (Kit format, Expressions and queries) and docs/DOMAIN_MODEL.md (Kits). Changing this file requires an ADR.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "version", "name", "license", "requires", "entities", "setup"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
+    "version": { "$ref": "#/$defs/semver" },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "license": { "type": "string", "minLength": 1 },
+    "requires": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "engine-api"],
+      "properties": {
+        "platform": { "type": "string" },
+        "engine-api": { "type": "string" },
+        "engines": { "type": "object", "additionalProperties": { "type": "string" } },
+        "libraries": { "type": "object", "additionalProperties": { "type": "string" } }
+      }
+    },
+    "extends": { "type": ["string", "null"], "pattern": "^@[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$" },
+    "roles": { "type": "array", "items": { "$ref": "#/$defs/localId" }, "uniqueItems": true },
+    "settings": {
+      "type": "object",
+      "description": "User-facing settings: name -> definition.",
+      "additionalProperties": { "$ref": "#/$defs/field" }
+    },
+    "entities": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": { "$ref": "#/$defs/localId" },
+      "additionalProperties": { "$ref": "#/$defs/entityType" }
+    },
+    "relations": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/localId" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to"],
+        "properties": {
+          "from": { "$ref": "#/$defs/localId" },
+          "to": { "$ref": "#/$defs/localId" },
+          "cardinality": { "enum": ["one_to_one", "one_to_many", "many_to_many"] }
+        }
+      }
+    },
+    "events": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/localId" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["class"],
+        "properties": {
+          "class": { "enum": ["story", "evidence", "bookkeeping"] },
+          "payload": { "type": "object", "additionalProperties": { "$ref": "#/$defs/field" } },
+          "visibility": { "$ref": "#/$defs/visibility" }
+        }
+      }
+    },
+    "engines": {
+      "type": "object",
+      "description": "Engine bindings: engine id -> configuration. `rules` holds CEL rules (later milestone).",
+      "additionalProperties": { "type": "object" }
+    },
+    "activities": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/localId" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "engine", "presenter"],
+        "properties": {
+          "title": { "type": "string" },
+          "engine": { "type": "string" },
+          "presenter": { "type": "string" },
+          "skill": { "type": "string" },
+          "select": { "type": "object" },
+          "map": {
+            "type": "object",
+            "additionalProperties": { "oneOf": [{ "$ref": "#/$defs/expr" }, { "$ref": "#/$defs/filter" }] }
+          },
+          "grading": { "enum": ["self_rated", "auto", "none"] }
+        }
+      }
+    },
+    "primary_actions": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/localId" },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["activity"],
+            "properties": { "activity": { "$ref": "#/$defs/localId" }, "label": { "type": "string" } }
+          }
+        ]
+      }
+    },
+    "briefing": {
+      "type": "object",
+      "description": "Role -> ordered list of section ids.",
+      "additionalProperties": { "type": "array", "items": { "type": "string" } }
+    },
+    "tools": { "type": "array", "items": { "type": "string" } },
+    "views": { "type": "array", "items": { "type": "string" } },
+    "setup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["skill"],
+      "properties": {
+        "skill": { "type": "string" },
+        "starters": { "type": "array", "items": { "$ref": "#/$defs/localId" } },
+        "libraries": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "skills": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+  },
+  "$defs": {
+    "semver": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$" },
+    "localId": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "expr": { "type": "string", "description": "A CEL expression (docs/FILTERS.md)." },
+    "filter": {
+      "type": "object",
+      "description": "The one query format (docs/FILTERS.md).",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "oneOf": [
+            { "$ref": "#/$defs/localId" },
+            { "type": "array", "items": { "$ref": "#/$defs/localId" }, "minItems": 1 }
+          ]
+        },
+        "where": { "$ref": "#/$defs/expr" },
+        "include": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "history": { "type": "boolean" } }
+        },
+        "sort": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field"],
+            "properties": { "field": { "type": "string" }, "dir": { "enum": ["asc", "desc"] } }
+          }
+        },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 1000 }
+      }
+    },
+    "visibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "roles": { "type": "array", "items": { "$ref": "#/$defs/localId" } },
+        "reveal_on": { "type": "string", "description": "event(<event_type>)" }
+      }
+    },
+    "field": {
+      "oneOf": [
+        { "type": "string", "description": "Short form: a type, e.g. text, int, ref(npc), list(text), enum[a, b]" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": { "type": "string" },
+            "required": { "type": "boolean" },
+            "default": {},
+            "description": { "type": "string" },
+            "visibility": { "$ref": "#/$defs/visibility" }
+          }
+        }
+      ]
+    },
+    "entityType": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fields"],
+      "properties": {
+        "fields": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "$ref": "#/$defs/localId" },
+          "additionalProperties": { "$ref": "#/$defs/field" }
+        },
+        "title_field": { "type": "string" },
+        "visibility": { "$ref": "#/$defs/visibility" },
+        "editable_by": { "type": "array", "items": { "type": "string" } },
+        "lifecycle": { "enum": ["note", "thread"] },
+        "dedupe_on": { "type": "array", "items": { "type": "string" } },
+        "import_from": {
+          "type": "object",
+          "description": "Library id -> field mapping (CEL expressions over `record`).",
+          "additionalProperties": { "type": "object", "additionalProperties": { "$ref": "#/$defs/expr" } }
+        }
+      }
+    }
+  }
+}

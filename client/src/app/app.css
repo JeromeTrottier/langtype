@@ -1,0 +1,55 @@
+:root {
+  --bg: #fbfaf8;
+  --fg: #1d1b18;
+  --muted: #6b665e;
+  --accent: #3b5bdb;
+  --border: #e6e2db;
+  font-family: system-ui, sans-serif;
+  color: var(--fg);
+  background: var(--bg);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161514;
+    --fg: #ece9e4;
+    --muted: #a19b91;
+    --accent: #8ea6ff;
+    --border: #2e2b28;
+  }
+}
+body {
+  margin: 0;
+}
+.shell {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-height: 100vh;
+}
+.shell-header {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.shell-header nav {
+  display: flex;
+  gap: 1rem;
+}
+.shell-header a {
+  color: var(--muted);
+  text-decoration: none;
+}
+.shell-header a.active {
+  color: var(--accent);
+}
+.shell-main {
+  padding: 1.25rem;
+  max-width: 60rem;
+}
+.shell-footer {
+  padding: 0.5rem 1.25rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  border-top: 1px solid var(--border);
+}
