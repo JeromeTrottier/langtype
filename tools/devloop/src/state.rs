@@ -1,6 +1,6 @@
 //! devloop's own files in `.devloop/`: daily usage, pause-until, running agents, control files.
 
-use crate::outcome::Usage;
+use crate::outcome::{RateWindow, Usage};
 use anyhow::Context;
 use chrono::{DateTime, Local, Utc};
 use serde::{Deserialize, Serialize};
@@ -64,6 +64,28 @@ pub struct Running {
     pub role: String,
     pub target: String,
     pub started_at: DateTime<Utc>,
+}
+
+/// The latest usage windows reported by any run (account-wide utilization).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Limits {
+    pub windows: Vec<RateWindow>,
+    pub seen_at: Option<DateTime<Utc>>,
+}
+
+fn limits_path(repo: &Path) -> PathBuf {
+    dir(repo).join("limits.json")
+}
+
+pub fn load_limits(repo: &Path) -> Limits {
+    std::fs::read_to_string(limits_path(repo))
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_limits(repo: &Path, windows: &[RateWindow]) -> anyhow::Result<()> {
+    write_json(&limits_path(repo), &Limits { windows: windows.to_vec(), seen_at: Some(Utc::now()) })
 }
 
 fn state_path(repo: &Path) -> PathBuf {

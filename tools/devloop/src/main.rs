@@ -211,6 +211,16 @@ async fn run_loop(repo: &Path, once: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// A local time, with the day when it isn't today.
+fn when(t: chrono::DateTime<Utc>) -> String {
+    let local = t.with_timezone(&Local);
+    if local.date_naive() == Local::now().date_naive() {
+        format!("at {}", local.format("%H:%M"))
+    } else {
+        format!("{}", local.format("%a %d %b %H:%M"))
+    }
+}
+
 fn target_of(action: &Action) -> String {
     match action {
         Action::Plan(m) => format!("plan {m}"),
@@ -226,7 +236,17 @@ fn blocked_reason(repo: &Path, config: &Config) -> Option<String> {
     if let Some(until) = state::load_state(repo).paused_until
         && until > Utc::now()
     {
-        return Some(format!("usage limit; resuming at {}", until.with_timezone(&Local).format("%H:%M")));
+        return Some(format!("usage limit or cap; resuming {}", when(until)));
+    }
+    let limits = state::load_limits(repo);
+    if let Some(w) = outcome::over_cap(&limits.windows, config.max_usage_percent, Utc::now()) {
+        return Some(format!(
+            "{} usage at {:.0}% (cap {:.0}%); resuming {}",
+            w.name.replace('_', "-"),
+            w.utilization * 100.0,
+            config.max_usage_percent,
+            when(w.resets_at)
+        ));
     }
     if config.is_quiet(Local::now().time()) {
         return Some("quiet hours".into());
@@ -336,14 +356,11 @@ fn apply_outcome(
 ) -> anyhow::Result<()> {
     let run_log = log_path.strip_prefix(repo).unwrap_or(log_path).display().to_string();
 
-    if let Outcome::UsageLimit { resume_at } = &outcome {
+    if let Outcome::UsageLimit { resume_at, reason } = &outcome {
         let mut s = state::load_state(repo);
-        s.paused_until = Some(*resume_at);
+        s.paused_until = Some(s.paused_until.map_or(*resume_at, |p| p.max(*resume_at)));
         state::save_state(repo, &s)?;
-        runner::notify(&format!(
-            "Claude usage limit reached; pausing until {}",
-            resume_at.with_timezone(&Local).format("%H:%M")
-        ));
+        runner::notify(&format!("{reason}; pausing, resuming {}", when(*resume_at)));
         if let Some(id) = action.task_id() {
             let mut t = task::find(repo, id)?;
             match action {
@@ -354,7 +371,7 @@ fn apply_outcome(
                 }
                 _ => {}
             }
-            t.log(&format!("{} interrupted by the usage limit; will retry", action.role()));
+            t.log(&format!("{} stopped: {reason}; will retry", action.role()));
             t.save()?;
         }
         return Ok(());
@@ -455,6 +472,27 @@ fn status(repo: &Path) -> anyhow::Result<()> {
     );
     if let Some(reason) = blocked_reason(repo, &config) {
         println!("new runs: on hold ({reason})");
+    }
+    let limits = state::load_limits(repo);
+    if let Some(seen) = limits.seen_at {
+        let windows: Vec<String> = limits
+            .windows
+            .iter()
+            .map(|w| {
+                format!(
+                    "{} {:.0}% (resets {})",
+                    w.name.replace('_', "-"),
+                    w.utilization * 100.0,
+                    when(w.resets_at)
+                )
+            })
+            .collect();
+        println!(
+            "Claude usage (cap {:.0}%): {}  ·  as of {}",
+            config.max_usage_percent,
+            windows.join(", "),
+            seen.with_timezone(&Local).format("%H:%M")
+        );
     }
     if let Some(at) = s.last_cycle {
         println!("last cycle: {}", at.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S"));

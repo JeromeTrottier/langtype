@@ -16,6 +16,8 @@ pub struct Config {
     pub max_concurrent: usize,
     pub max_runs_per_day: u32,
     pub max_tokens_per_day: u64,
+    /// Stop at this share (percent) of any Claude usage window (5-hour, 7-day), account-wide.
+    pub max_usage_percent: f64,
     pub max_turns_per_run: u32,
     pub run_timeout_minutes: u64,
     pub max_fix_attempts: u32,
@@ -34,6 +36,7 @@ impl Default for Config {
             max_concurrent: 2,
             max_runs_per_day: 40,
             max_tokens_per_day: 0,
+            max_usage_percent: 70.0,
             max_turns_per_run: 80,
             run_timeout_minutes: 60,
             max_fix_attempts: 3,
@@ -98,5 +101,6 @@ mod tests {
         let c: Config = toml::from_str(text).unwrap();
         assert_eq!(c.base_branch, "main");
         assert!(c.max_concurrent >= 1);
+        assert!((c.max_usage_percent - 70.0).abs() < f64::EPSILON);
     }
 }

@@ -1,4 +1,7 @@
-//! Reading what a headless Claude Code run produced (`claude -p --output-format json`).
+//! Reading what a headless Claude Code run produced (`claude -p --output-format stream-json --verbose`).
+//!
+//! The stream's last line is the `result` event; `rate_limit_event` lines report account-wide
+//! utilization per window (`five_hour`, `seven_day`), used for the usage cap.
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
@@ -36,8 +39,8 @@ pub enum Outcome {
     Reported { reported: Reported, usage: Usage },
     /// The run finished without the marker line.
     NoReport { message: String, usage: Usage },
-    /// Claude's usage limit was reached; pause new runs until `resume_at`.
-    UsageLimit { resume_at: DateTime<Utc> },
+    /// Claude's usage limit, or devloop's usage cap, was reached; pause new runs until `resume_at`.
+    UsageLimit { resume_at: DateTime<Utc>, reason: String },
     /// The run failed (error exit, timeout, unreadable output).
     Failed { message: String, usage: Usage },
 }
@@ -45,7 +48,7 @@ pub enum Outcome {
 /// Interpret a finished run's stdout and stderr.
 pub fn interpret(stdout: &str, stderr: &str, now: DateTime<Utc>) -> Outcome {
     if let Some(resume_at) = usage_limit(&format!("{stdout}\n{stderr}"), now) {
-        return Outcome::UsageLimit { resume_at };
+        return Outcome::UsageLimit { resume_at, reason: "Claude usage limit reached".into() };
     }
     let json: Option<Value> = stdout
         .lines()
@@ -78,6 +81,50 @@ fn read_usage(json: &Value) -> Usage {
         output_tokens: n("output_tokens"),
         cost_usd: json.get("total_cost_usd").and_then(Value::as_f64).unwrap_or(0.0),
     }
+}
+
+/// One usage window as reported in a `rate_limit_event`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RateWindow {
+    /// `five_hour`, `seven_day`, …
+    pub name: String,
+    /// Fraction of the window used, 0.0–1.0 (account-wide, interactive use included).
+    pub utilization: f64,
+    pub resets_at: DateTime<Utc>,
+    /// `allowed`, `allowed_warning`, `rejected`, …
+    pub status: String,
+}
+
+/// Parse the usage windows from a `rate_limit_event` line, if it is one.
+pub fn rate_windows(line: &str) -> Option<Vec<RateWindow>> {
+    let event: Value = serde_json::from_str(line.trim()).ok()?;
+    if event.get("type").and_then(Value::as_str) != Some("rate_limit_event") {
+        return None;
+    }
+    let info = event.get("rate_limit_info")?;
+    let windows = info.get("unifiedWindows").and_then(Value::as_object)?;
+    let mut out: Vec<RateWindow> = windows
+        .iter()
+        .filter_map(|(name, w)| {
+            Some(RateWindow {
+                name: name.clone(),
+                utilization: w.get("utilization").and_then(Value::as_f64)?,
+                resets_at: DateTime::<Utc>::from_timestamp(w.get("resetsAt").and_then(Value::as_i64)?, 0)?,
+                status: w.get("status").and_then(Value::as_str).unwrap_or("allowed").to_string(),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Some(out)
+}
+
+/// The first window that blocks new work: rejected by Claude, or at/above `cap_percent` of its
+/// limit, and not yet reset at `now`.
+pub fn over_cap(windows: &[RateWindow], cap_percent: f64, now: DateTime<Utc>) -> Option<&RateWindow> {
+    windows
+        .iter()
+        .filter(|w| w.resets_at > now)
+        .find(|w| w.status == "rejected" || w.utilization * 100.0 + 1e-9 >= cap_percent)
 }
 
 /// Find the last `DEVLOOP_RESULT: {...}` line in the agent's final message.
@@ -157,6 +204,50 @@ mod tests {
         let text = "Error: You've hit your usage limit. Try again later.";
         assert_eq!(usage_limit(text, now()), Some(now() + Duration::hours(1)));
         assert!(matches!(interpret("", text, now()), Outcome::UsageLimit { .. }));
+    }
+
+    const RATE_EVENT: &str = r#"{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1800018000,"rateLimitType":"five_hour","unifiedWindows":{"five_hour":{"utilization":0.58,"resetsAt":1800018000,"status":"allowed"},"seven_day":{"utilization":0.13,"resetsAt":1800300000,"status":"allowed"}}}}"#;
+
+    #[test]
+    fn parses_rate_limit_events() {
+        let windows = rate_windows(RATE_EVENT).unwrap();
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0].name, "five_hour");
+        assert!((windows[0].utilization - 0.58).abs() < 1e-9);
+        assert_eq!(windows[1].name, "seven_day");
+        assert!(rate_windows(r#"{"type":"assistant"}"#).is_none());
+        assert!(rate_windows("not json").is_none());
+    }
+
+    #[test]
+    fn cap_blocks_at_or_above_the_percentage() {
+        let windows = rate_windows(RATE_EVENT).unwrap();
+        assert!(over_cap(&windows, 70.0, now()).is_none(), "58% and 13% are under 70%");
+        assert_eq!(over_cap(&windows, 58.0, now()).map(|w| w.name.as_str()), Some("five_hour"));
+        assert_eq!(over_cap(&windows, 50.0, now()).map(|w| w.name.as_str()), Some("five_hour"));
+    }
+
+    #[test]
+    fn cap_ignores_windows_that_already_reset() {
+        let windows = rate_windows(RATE_EVENT).unwrap();
+        let later = DateTime::<Utc>::from_timestamp(1_800_018_001, 0).unwrap();
+        assert!(over_cap(&windows, 50.0, later).is_none(), "five_hour has reset; seven_day is 13%");
+    }
+
+    #[test]
+    fn rejected_windows_always_block() {
+        let mut windows = rate_windows(RATE_EVENT).unwrap();
+        windows[1].status = "rejected".into();
+        assert_eq!(over_cap(&windows, 100.0, now()).map(|w| w.name.as_str()), Some("seven_day"));
+    }
+
+    #[test]
+    fn stream_result_line_is_interpreted() {
+        let stream = format!(
+            "{{\"type\":\"system\",\"subtype\":\"init\"}}\n{RATE_EVENT}\n{}",
+            r#"{"type":"result","subtype":"success","is_error":false,"result":"ok\nDEVLOOP_RESULT: {\"status\":\"agent_review\",\"summary\":\"x\"}","usage":{"input_tokens":1,"output_tokens":1}}"#
+        );
+        assert!(matches!(interpret(&stream, "", now()), Outcome::Reported { .. }));
     }
 
     #[test]

@@ -9,6 +9,8 @@ check_command = "just check"   # run by `devloop accept` before merging
 max_concurrent = 2
 max_runs_per_day = 40
 max_tokens_per_day = 0         # 0 = no cap (Claude's own usage limit still pauses the loop)
+max_usage_percent = 70         # stop at 70% of any Claude usage window (5-hour, 7-day), account-wide:
+                               # no new runs above it, and a running agent is stopped when it crosses it
 max_turns_per_run = 80
 run_timeout_minutes = 60
 max_fix_attempts = 3

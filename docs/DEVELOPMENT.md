@@ -83,8 +83,9 @@ A small Rust binary in `tools/devloop`. Every two minutes it:
 Each agent run:
 - gets its own **git worktree** (`../langtype-worktrees/<id>`) on branch `task/<id>-<slug>`,
   created from local `main`;
-- runs **headless Claude Code**: `claude -p "/<skill> <id>" --output-format json --max-turns <n>
-  --permission-mode acceptEdits`, using the repo's `.claude/settings.json` (allowlist, hooks);
+- runs **headless Claude Code**: `claude -p "/<skill> <id>" --output-format stream-json --verbose
+  --max-turns <n> --permission-mode acceptEdits`, using the repo's `.claude/settings.json`
+  (allowlist, hooks), in its own process group so stopping it also stops the tools it started;
 - has a **timeout** (default 60 minutes);
 - writes its full output to `.devloop/runs/<id>/<timestamp>.json`.
 
@@ -94,7 +95,7 @@ Commands:
 |---|---|
 | `devloop run` | The loop (what launchd runs) |
 | `devloop once` | One cycle, then exit (for testing) |
-| `devloop status` | Tasks by status, running agents, today's usage |
+| `devloop status` | Tasks by status, running agents, today's usage, Claude usage windows vs the cap |
 | `devloop approve <id>…` | `proposed` → `ready` |
 | `devloop accept <id>` | Re-run checks on the branch, merge into `main`, mark `done`, remove the worktree |
 | `devloop reject <id> "<note>"` | `awaiting_human` → `needs_fix`, note added to the log |
@@ -103,6 +104,16 @@ Commands:
 
 ## 4. Usage limits and budget
 
+- **Usage cap (default 70%):** every run streams `rate_limit_event`s with your account's
+  utilization of each Claude usage window (5-hour and 7-day; your interactive use counts too).
+  devloop saves the latest reading in `.devloop/limits.json` and:
+  - starts **no new runs** while any window is at or above `max_usage_percent`, until it resets;
+  - **stops a running agent** the moment a window crosses the cap, puts its task back (not
+    counted as a fix attempt), and resumes after the reset. Work already in the worktree is kept.
+
+  The rest of each window (30% by default) stays free for you. The reading is only as fresh as
+  the last run, so after a long pause the first new run may be stopped quickly if your own use
+  pushed a window past the cap meanwhile.
 - **Claude's usage limit:** when a run fails because the limit is reached, devloop **pauses all
   new runs** until the reset time given in the error (or one hour later if none is given), and
   notifies you.
@@ -112,6 +123,7 @@ Commands:
 max_concurrent = 2
 max_runs_per_day = 40
 max_tokens_per_day = 0        # 0 = no cap; otherwise tokens counted from each run's JSON output
+max_usage_percent = 70        # stop at 70% of any Claude usage window (5-hour, 7-day)
 max_turns_per_run = 80
 run_timeout_minutes = 60
 quiet_hours = []              # e.g. ["09:00-17:00"] to keep usage free while you work

@@ -72,7 +72,7 @@ pub async fn run_agent(
     cmd.current_dir(cwd)
         .arg("-p")
         .arg(prompt(action, task_path))
-        .args(["--output-format", "json", "--permission-mode", "acceptEdits"])
+        .args(["--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"])
         .arg("--max-turns")
         .arg(config.max_turns_per_run.to_string())
         .arg("--add-dir")
@@ -83,6 +83,8 @@ pub async fn run_agent(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        // Own process group, so stopping the agent also stops the tools it started.
+        .process_group(0)
         .kill_on_drop(true);
 
     let outcome = match cmd.spawn() {
@@ -91,8 +93,13 @@ pub async fn run_agent(
             usage: Default::default(),
         },
         Ok(child) => {
+            let pid = child.id();
             let limit = Duration::from_secs(config.run_timeout_minutes * 60);
-            match tokio::time::timeout(limit, child.wait_with_output()).await {
+            let result = tokio::time::timeout(limit, watch(repo, config, child)).await;
+            if result.is_err() {
+                stop_group(pid);
+            }
+            match result {
                 Err(_) => Outcome::Failed {
                     message: format!("timed out after {} minutes", config.run_timeout_minutes),
                     usage: Default::default(),
@@ -100,17 +107,90 @@ pub async fn run_agent(
                 Ok(Err(e)) => {
                     Outcome::Failed { message: format!("waiting for agent: {e}"), usage: Default::default() }
                 }
-                Ok(Ok(out)) => {
-                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-                    let record = serde_json::json!({ "role": action.role(), "cwd": cwd, "exit": out.status.code(), "stdout": stdout, "stderr": stderr });
+                Ok(Ok(run)) => {
+                    let record = serde_json::json!({
+                        "role": action.role(), "cwd": cwd, "exit": run.exit,
+                        "stopped_for_cap": run.capped.is_some(), "stdout": run.stdout, "stderr": run.stderr,
+                    });
                     let _ = state::write_json(&log_path, &record);
-                    outcome::interpret(&stdout, &stderr, Utc::now())
+                    match run.capped {
+                        Some(outcome) => outcome,
+                        None => outcome::interpret(&run.stdout, &run.stderr, Utc::now()),
+                    }
                 }
             }
         }
     };
     (outcome, log_path)
+}
+
+struct Finished {
+    stdout: String,
+    stderr: String,
+    exit: Option<i32>,
+    /// Set when devloop stopped the agent because a usage window crossed the cap.
+    capped: Option<Outcome>,
+}
+
+/// Read the agent's event stream as it runs. Every `rate_limit_event` updates
+/// `.devloop/limits.json`; if a window reaches `max_usage_percent`, the agent is stopped.
+async fn watch(repo: &Path, config: &Config, mut child: tokio::process::Child) -> std::io::Result<Finished> {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let mut stderr = child.stderr.take().expect("stderr is piped");
+    let stderr_task = tokio::spawn(async move {
+        let mut text = String::new();
+        let _ = stderr.read_to_string(&mut text).await;
+        text
+    });
+
+    let mut lines = BufReader::new(stdout).lines();
+    let mut out = String::new();
+    let mut capped = None;
+    while let Some(line) = lines.next_line().await? {
+        if let Some(windows) = outcome::rate_windows(&line) {
+            let _ = state::save_limits(repo, &windows);
+            if let Some(w) = outcome::over_cap(&windows, config.max_usage_percent, Utc::now()) {
+                let reason = if w.status == "rejected" {
+                    format!("Claude usage limit reached ({} window)", w.name)
+                } else {
+                    format!(
+                        "{} usage at {:.0}% (cap {:.0}%)",
+                        w.name.replace('_', "-"),
+                        w.utilization * 100.0,
+                        config.max_usage_percent
+                    )
+                };
+                capped = Some(Outcome::UsageLimit { resume_at: w.resets_at, reason });
+                out.push_str(&line);
+                out.push('\n');
+                stop_group(child.id());
+                let _ = child.kill().await;
+                break;
+            }
+        }
+        out.push_str(&line);
+        out.push('\n');
+    }
+    let status = child.wait().await?;
+    // A stopped agent's leftover children may hold stderr open; don't wait on them for long.
+    let stderr = tokio::time::timeout(Duration::from_secs(5), stderr_task)
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .unwrap_or_default();
+    Ok(Finished { stdout: out, stderr, exit: status.code(), capped })
+}
+
+/// Stop the agent's whole process group (it was started with `process_group(0)`, so its
+/// group id is its pid): SIGTERM first, SIGKILL shortly after.
+fn stop_group(pid: Option<u32>) {
+    let Some(pid) = pid else { return };
+    let group = format!("-{pid}");
+    let _ = std::process::Command::new("kill").args(["-TERM", "--", &group]).stderr(Stdio::null()).status();
+    std::thread::sleep(Duration::from_millis(500));
+    let _ = std::process::Command::new("kill").args(["-KILL", "--", &group]).stderr(Stdio::null()).status();
 }
 
 /// macOS notification (skipped when `DEVLOOP_QUIET=1`); failures are ignored.
