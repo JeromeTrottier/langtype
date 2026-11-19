@@ -55,6 +55,11 @@ agents-status:
 agents-watch *args:
     cargo run -q -p devloop -- watch {{args}}
 
+# Install the headless browser used by `just screenshot`. Skips Playwright's cleanup of other
+# projects' browsers, which hangs when one of them lives in a protected folder (e.g. Desktop).
+install-browser:
+    PLAYWRIGHT_SKIP_BROWSER_GC=1 pnpm --dir client exec playwright install chromium-headless-shell
+
 # Validation screenshots for pull requests (see client/scripts/screenshot.mjs).
 [positional-arguments]
 screenshot *args:

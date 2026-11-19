@@ -19,10 +19,11 @@ data and can see and edit it in a dashboard.
 
 ## Getting started
 
-Requirements: Rust (stable), Node 23 + pnpm, [`just`](https://github.com/casey/just).
+Requirements: Rust (stable), Node 24 + pnpm, [`just`](https://github.com/casey/just).
 
 ```bash
 pnpm --dir client install
+just install-browser   # headless Chromium for validation screenshots
 just dev        # server on http://127.0.0.1:3000, dashboard on http://localhost:5173
 just check      # everything CI checks
 ```
