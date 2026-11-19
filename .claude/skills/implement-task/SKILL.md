@@ -20,8 +20,21 @@ Input: the absolute path of a task file. You run inside the task's git worktree,
    add an ADR (`/write-adr`).
 6. **Commit** on the current branch: `git add -A && git commit -m "<type>(<area>): <what> (#<id>)"`.
    Never push, merge or switch branches. Never edit `work/tasks/`.
-7. **Self-review** the diff (`git diff <base>...HEAD`) against the acceptance criteria and the
+7. **PR description and validation screenshots** (devloop turns them into the pull request;
+   `.devloop-pr/` is git-ignored, don't commit it):
+   - Write `.devloop-pr/description.md` with `## Summary` (what and why, 2–4 sentences),
+     `## Changes` (bullets by area), `## How it was validated` (commands run and what they
+     showed), `## Notes` (follow-ups, limitations). Plain words; no task log, no criteria list
+     (devloop adds those).
+   - Screenshots into `.devloop-pr/screenshots/` with `just screenshot`:
+     - **always** the tests that prove the task, e.g.
+       `just screenshot --run "cargo test -p mnemo-store" --name store-tests`;
+     - **UI changes:** every page you changed, e.g.
+       `just screenshot --page /settings --name settings --dark` (starts its own server and
+       dashboard on free ports).
+     A failing `--run` means the work isn't done.
+8. **Self-review** the diff (`git diff <base>...HEAD`) against the acceptance criteria and the
    invariants in `CLAUDE.md`.
-8. Final message: what changed, how it's tested, any follow-ups, then
+9. Final message: what changed, how it's tested, any follow-ups, then
    `DEVLOOP_RESULT: {"status": "agent_review", "summary": "<one line>"}`
    (or `"blocked"` with the reason).

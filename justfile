@@ -51,6 +51,15 @@ check: check-fast check-kits check-api
 agents-status:
     cargo run -q -p devloop -- status
 
+# Live feed of what the development agents are doing.
+agents-watch *args:
+    cargo run -q -p devloop -- watch {{args}}
+
+# Validation screenshots for pull requests (see client/scripts/screenshot.mjs).
+[positional-arguments]
+screenshot *args:
+    node client/scripts/screenshot.mjs "$@"
+
 # Install devloop to run at login (builds a release binary first).
 agents-install:
     cargo build -q -p devloop --release

@@ -48,6 +48,12 @@ pub struct Meta {
     pub attempts: u32,
     #[serde(default)]
     pub branch: Option<String>,
+    /// Pull request URL, once devloop has opened one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr: Option<String>,
+    /// Last time devloop read the PR's feedback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_synced_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Clone, Debug)]
@@ -121,21 +127,40 @@ pub fn tasks_dir(repo: &Path) -> PathBuf {
     repo.join("work").join("tasks")
 }
 
-/// Load every task, sorted by id. Files starting with `_` (templates) are skipped.
-pub fn load_all(repo: &Path) -> anyhow::Result<Vec<Task>> {
+/// A task file that couldn't be read; it is skipped until fixed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Invalid {
+    pub path: PathBuf,
+    pub error: String,
+}
+
+/// Load every readable task, sorted by id, plus the files that couldn't be read.
+/// Files starting with `_` (templates) are skipped. One bad file never stops the others.
+pub fn load_checked(repo: &Path) -> anyhow::Result<(Vec<Task>, Vec<Invalid>)> {
     let dir = tasks_dir(repo);
-    let mut tasks = Vec::new();
-    let Ok(entries) = std::fs::read_dir(&dir) else { return Ok(tasks) };
+    let (mut tasks, mut invalid) = (Vec::new(), Vec::new());
+    let Ok(entries) = std::fs::read_dir(&dir) else { return Ok((tasks, invalid)) };
     for entry in entries {
         let path = entry?.path();
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
         if path.extension().is_some_and(|e| e == "md") && !name.starts_with('_') {
-            let text = std::fs::read_to_string(&path)?;
-            tasks.push(Task::parse(&path, &text)?);
+            match std::fs::read_to_string(&path)
+                .map_err(anyhow::Error::from)
+                .and_then(|t| Task::parse(&path, &t))
+            {
+                Ok(task) => tasks.push(task),
+                Err(e) => invalid.push(Invalid { path, error: format!("{e:#}") }),
+            }
         }
     }
     tasks.sort_by_key(|t| t.meta.id);
-    Ok(tasks)
+    invalid.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok((tasks, invalid))
+}
+
+/// Load every readable task, sorted by id (unreadable files are skipped).
+pub fn load_all(repo: &Path) -> anyhow::Result<Vec<Task>> {
+    load_checked(repo).map(|(tasks, _)| tasks)
 }
 
 pub fn find(repo: &Path, id: u32) -> anyhow::Result<Task> {
@@ -176,6 +201,21 @@ mod tests {
         assert_eq!(task.body.matches("## Log").count(), 1);
         assert!(task.body.contains("implementer started"));
         assert!(task.body.trim_end().ends_with("review passed"));
+    }
+
+    #[test]
+    fn unreadable_files_are_reported_not_fatal() {
+        let dir = tempfile::tempdir().unwrap();
+        let tasks = dir.path().join("work/tasks");
+        std::fs::create_dir_all(&tasks).unwrap();
+        std::fs::write(tasks.join("0007-x.md"), SAMPLE).unwrap();
+        let bad = "---\nid: 8\ntitle: Activity runs: start, complete\nmilestone: M1\nstatus: ready\n---\n";
+        std::fs::write(tasks.join("0008-bad.md"), bad).unwrap();
+        let (ok, invalid) = load_checked(dir.path()).unwrap();
+        assert_eq!(ok.len(), 1);
+        assert_eq!(invalid.len(), 1);
+        assert!(invalid[0].path.ends_with("0008-bad.md"));
+        assert_eq!(load_all(dir.path()).unwrap().len(), 1);
     }
 
     #[test]

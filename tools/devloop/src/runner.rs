@@ -63,9 +63,9 @@ pub async fn run_agent(
     action: &Action,
     cwd: &Path,
     task_path: Option<&Path>,
+    log_path: PathBuf,
 ) -> (Outcome, PathBuf) {
-    let target = action.task_id().map(|id| format!("{id:04}")).unwrap_or_else(|| "planner".into());
-    let log_path = state::run_log_path(repo, &target, action.role());
+    let target = state::run_target(action.task_id());
     let tasks_dir = crate::task::tasks_dir(repo);
 
     let mut cmd = Command::new(&config.claude_bin);
@@ -95,7 +95,8 @@ pub async fn run_agent(
         Ok(child) => {
             let pid = child.id();
             let limit = Duration::from_secs(config.run_timeout_minutes * 60);
-            let result = tokio::time::timeout(limit, watch(repo, config, child)).await;
+            let stream = state::stream_path(&log_path);
+            let result = tokio::time::timeout(limit, watch(repo, config, child, &stream)).await;
             if result.is_err() {
                 stop_group(pid);
             }
@@ -134,8 +135,19 @@ struct Finished {
 
 /// Read the agent's event stream as it runs. Every `rate_limit_event` updates
 /// `.devloop/limits.json`; if a window reaches `max_usage_percent`, the agent is stopped.
-async fn watch(repo: &Path, config: &Config, mut child: tokio::process::Child) -> std::io::Result<Finished> {
-    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+async fn watch(
+    repo: &Path,
+    config: &Config,
+    mut child: tokio::process::Child,
+    stream_path: &Path,
+) -> std::io::Result<Finished> {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+    // Every event is appended to the live stream file as it arrives (`devloop watch` follows it).
+    if let Some(parent) = stream_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let mut live = tokio::fs::OpenOptions::new().create(true).append(true).open(stream_path).await?;
 
     let stdout = child.stdout.take().expect("stdout is piped");
     let mut stderr = child.stderr.take().expect("stderr is piped");
@@ -149,6 +161,8 @@ async fn watch(repo: &Path, config: &Config, mut child: tokio::process::Child) -
     let mut out = String::new();
     let mut capped = None;
     while let Some(line) = lines.next_line().await? {
+        let _ = live.write_all(format!("{line}\n").as_bytes()).await;
+        let _ = live.flush().await;
         if let Some(windows) = outcome::rate_windows(&line) {
             let _ = state::save_limits(repo, &windows);
             if let Some(w) = outcome::over_cap(&windows, config.max_usage_percent, Utc::now()) {

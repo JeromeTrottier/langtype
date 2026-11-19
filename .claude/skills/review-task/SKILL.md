@@ -12,6 +12,9 @@ only read, run checks and report.
 2. Get the diff: `git diff main...HEAD` (and `git log main..HEAD --oneline`).
 3. Use the `reviewer` subagent with the task path and the diff for an independent review.
 4. Run `just check` yourself. Any failure is a finding.
+4b. Check the PR material in `.devloop-pr/`: `description.md` exists and matches the diff, and
+    `screenshots/` has the tests screenshot (plus page screenshots for UI changes). Open the
+    images (Read) to make sure they show what they claim. Missing or wrong material is a finding.
 5. Decide:
    - **awaiting_human** — every acceptance criterion is met and tested, checks pass, no
      invariant is at risk, scope is respected. Minor nits go in `findings` as "nit:".

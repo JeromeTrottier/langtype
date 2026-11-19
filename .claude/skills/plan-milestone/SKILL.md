@@ -20,7 +20,11 @@ Input: a milestone id (e.g. `M1`). You run in the main checkout; **only create f
    - foundations first (types, schema, traits), then features, then integration.
 3. Write one file per task: `work/tasks/NNNN-short-slug.md` (4-digit id), following
    `work/tasks/_template.md`, with `status: proposed`, `attempts: 0`, `branch: null`.
+   **Always quote the title** (`title: "Activity runs: start, complete"`): titles often contain
+   colons, which break the YAML frontmatter otherwise.
 4. Add a final task "Milestone <id> integration check" that depends on all others and verifies
    the milestone's definition in PLAN.md end to end.
-5. Final message: a table of the tasks (id, title, size, depends on), then
+5. Check your files: `cargo run -q -p devloop -- status` must list every new task and print no
+   `unreadable:` line. Fix any file it reports.
+6. Final message: a table of the tasks (id, title, size, depends on), then
    `DEVLOOP_RESULT: {"status": "proposed", "summary": "<n> tasks proposed for <milestone>"}`

@@ -64,6 +64,9 @@ pub struct Running {
     pub role: String,
     pub target: String,
     pub started_at: DateTime<Utc>,
+    /// Live event stream of the run (`.jsonl`), followed by `devloop watch`.
+    #[serde(default)]
+    pub stream: Option<PathBuf>,
 }
 
 /// The latest usage windows reported by any run (account-wide utilization).
@@ -120,6 +123,16 @@ pub fn set_flag(repo: &Path, name: &str, on: bool) -> anyhow::Result<()> {
         std::fs::remove_file(&path)?;
     }
     Ok(())
+}
+
+/// Live stream file for a run: same name as its final record, with `.jsonl`.
+pub fn stream_path(run_log: &Path) -> PathBuf {
+    run_log.with_extension("jsonl")
+}
+
+/// Folder name under `.devloop/runs/` for an action's target.
+pub fn run_target(task_id: Option<u32>) -> String {
+    task_id.map(|id| format!("{id:04}")).unwrap_or_else(|| "planner".into())
 }
 
 pub fn run_log_path(repo: &Path, target: &str, role: &str) -> PathBuf {

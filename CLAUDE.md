@@ -32,6 +32,7 @@ activity ("kits": language learning, tabletop RPG…). Read before changing anyt
 - `just fmt` — format Rust and client code.
 - `just gen-api` — regenerate `client/src/api/types.gen.ts` from the server's OpenAPI.
 - `just dev` — server on 127.0.0.1:3000 + Vite on :5173.
+- `just agents-status` / `just agents-watch` — development agents' state and live feed.
 - `cargo test -p <crate>` / `pnpm --dir client test` for focused runs.
 
 ## Conventions
@@ -71,3 +72,5 @@ activity ("kits": language learning, tabletop RPG…). Read before changing anyt
   `DEVLOOP_RESULT: {"status": "<status>", "summary": "<one line>", "findings": ["…"]}`
   — implementer/fixer: `agent_review` or `blocked`; reviewer: `awaiting_human`, `needs_fix` or `blocked`.
 - If something needs a human decision, stop and report `blocked` with the question in `summary`.
+- Leave the PR description and validation screenshots in `.devloop-pr/` (see `/implement-task`);
+  devloop opens the pull request. Never push or use `gh` yourself.

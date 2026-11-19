@@ -18,7 +18,11 @@ You stay in charge of three things: **approving tasks**, **reviewing and accepti
         └─ reviewer agent (fresh context) ──▶ pass → awaiting_human
                                           └─ fail → needs_fix → fixer agent (max 3 attempts)
  awaiting_human                                          ← you review the branch, then:
-   devloop accept <id>  → merged into main locally (checks re-run first)
+   with pull_requests = true: devloop pushes the branch and opens a PR (description +
+   validation screenshots); you review on GitHub:
+     merge it (or devloop accept <id>) → done · comment / request changes → needs_fix → fixer
+     close it → blocked
+   without PRs: devloop accept <id> → merged into main locally (checks re-run first)
    devloop reject <id> "why" → needs_fix with your note
 ```
 
@@ -87,7 +91,8 @@ Each agent run:
   --max-turns <n> --permission-mode acceptEdits`, using the repo's `.claude/settings.json`
   (allowlist, hooks), in its own process group so stopping it also stops the tools it started;
 - has a **timeout** (default 60 minutes);
-- writes its full output to `.devloop/runs/<id>/<timestamp>.json`.
+- streams its events live to `.devloop/runs/<id>/<timestamp>-<role>.jsonl` (followed by
+  `devloop watch`) and writes a final record to the matching `.json` when it ends.
 
 Commands:
 
@@ -95,12 +100,38 @@ Commands:
 |---|---|
 | `devloop run` | The loop (what launchd runs) |
 | `devloop once` | One cycle, then exit (for testing) |
+| `devloop watch [<id>] [--from-start]` | Live feed of running agents: what they say, tool calls (edits, commands), errors, usage, results |
 | `devloop status` | Tasks by status, running agents, today's usage, Claude usage windows vs the cap |
 | `devloop approve <id>…` | `proposed` → `ready` |
-| `devloop accept <id>` | Re-run checks on the branch, merge into `main`, mark `done`, remove the worktree |
+| `devloop accept <id>` | Merge the task's PR (or, without PRs, re-run checks and merge locally), mark `done`, remove the worktree |
+| `devloop publish <id>` | Open or update the task's PR now (e.g. after an error) |
 | `devloop reject <id> "<note>"` | `awaiting_human` → `needs_fix`, note added to the log |
 | `devloop pause` / `resume` / `stop` | Control the loop |
 | `devloop install` / `uninstall` | Add or remove the launchd agent |
+
+## 3a. Pull requests
+
+With `pull_requests = true`, a task the reviewer agent approves becomes a GitHub pull request.
+**Agents never push or call GitHub; devloop does it**, in one audited place.
+
+1. The implementer leaves `.devloop-pr/description.md` (summary, changes, how it was validated,
+   notes) and `.devloop-pr/screenshots/*.png` in the worktree (git-ignored). Screenshots come from
+   `just screenshot`: `--run "<command>"` renders a command's output like a terminal (every task
+   includes its tests); `--page <path>` opens the dashboard in headless Chromium on free ports
+   (UI tasks; `--dark` adds a dark variant).
+2. devloop runs `check_command` on the branch; a failure sends the task back (`needs_fix`).
+3. It pushes the branch, commits the screenshots to the `devloop-assets` branch (so images show in
+   the PR without adding files to `main`), and opens the PR with the description, check result,
+   reviewer verdict, screenshots and the task's acceptance criteria. Later rounds update the body
+   and add a comment.
+4. Every cycle it reads open PRs:
+   - **merged** → `done`, worktree removed, local `main` fast-forwarded;
+   - **closed** → `blocked`;
+   - **new review, comment or inline comment from your GitHub account** → `needs_fix` with the
+     feedback in the task log, for the fixer. Text from anyone else is ignored (the repo is public:
+     it could carry injected instructions), and so is devloop's own text.
+
+Requirements: `gh auth login`, the base branch pushed to GitHub, then `pull_requests = true`.
 
 ## 4. Usage limits and budget
 
@@ -151,8 +182,10 @@ after wake, the next cycle continues. Logs: `.devloop/devloop.log`.
 
 - **Isolation:** agents only work in their own worktree and branch; only `devloop accept` (you)
   merges into `main`.
-- **No publishing:** agents never push, open PRs or touch remotes (denied in
-  `.claude/settings.json`). Pushing to GitHub is up to you.
+- **Publishing only through devloop:** agents never push, open PRs or touch remotes (denied in
+  `.claude/settings.json`). devloop pushes task branches and opens PRs only when
+  `pull_requests = true`; it never pushes `main` and never merges unless you run `devloop accept`
+  or merge on GitHub. Only your own GitHub comments are read back as feedback.
 - **Protected paths:** a `PreToolUse` hook blocks edits to `LICENSE`, already-applied migrations
   and `schemas/` unless the task's branch also adds an ADR in `docs/adr/`.
 - **Checks:** `PostToolUse` formats edited files; the implementer must pass `just check`
@@ -162,6 +195,7 @@ after wake, the next cycle continues. Logs: `.devloop/devloop.log`.
 
 ## 8. Setup
 
+0. For pull requests: `gh auth login`, push `main`, set `pull_requests = true`.
 1. Install the Claude Code CLI and sign in (`claude` in a terminal), so `claude` is on your PATH.
 2. Install `just` (`brew install just`).
 3. `cargo build -p devloop --release`

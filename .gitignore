@@ -6,3 +6,4 @@
 client/node_modules
 client/dist
 *.tmp
+.devloop-pr/

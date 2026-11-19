@@ -1,6 +1,6 @@
 ---
 id: 0
-title: Short imperative title
+title: "Short imperative title (always quoted)"
 milestone: M1
 status: proposed
 depends_on: []

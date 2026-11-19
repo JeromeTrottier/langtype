@@ -23,6 +23,11 @@ pub struct Config {
     pub max_fix_attempts: u32,
     pub poll_seconds: u64,
     pub quiet_hours: Vec<String>,
+    /// Open pull requests for reviewed tasks (devloop pushes; agents never do).
+    pub pull_requests: bool,
+    pub remote: String,
+    pub assets_branch: String,
+    pub gh_bin: String,
 }
 
 impl Default for Config {
@@ -42,6 +47,10 @@ impl Default for Config {
             max_fix_attempts: 3,
             poll_seconds: 120,
             quiet_hours: Vec::new(),
+            pull_requests: false,
+            remote: "origin".into(),
+            assets_branch: "devloop-assets".into(),
+            gh_bin: "gh".into(),
         }
     }
 }

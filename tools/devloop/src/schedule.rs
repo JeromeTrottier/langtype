@@ -120,6 +120,8 @@ mod tests {
                 area: vec![],
                 attempts: 0,
                 branch: None,
+                pr: None,
+                pr_synced_at: None,
             },
             body: String::new(),
             path: PathBuf::from(format!("{id}.md")),

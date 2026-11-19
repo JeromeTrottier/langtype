@@ -4,10 +4,12 @@
 mod config;
 mod launchd;
 mod outcome;
+mod pr;
 mod runner;
 mod schedule;
 mod state;
 mod task;
+mod watch;
 
 use anyhow::{Context, bail};
 use chrono::{Local, Utc};
@@ -39,10 +41,20 @@ enum Cmd {
     Once,
     /// Show tasks, running agents and today's usage.
     Status,
+    /// Live, readable feed of running agents (text, tool calls, errors, usage, results).
+    Watch {
+        /// Only follow this task.
+        id: Option<u32>,
+        /// Replay running agents' feeds from their start instead of from now.
+        #[arg(long)]
+        from_start: bool,
+    },
     /// Approve proposed tasks (proposed → ready).
     Approve { ids: Vec<u32> },
-    /// Re-run checks, merge the task branch into the base branch, mark done.
+    /// Merge finished work: the task's PR (if any) or the task branch, then mark done.
     Accept { id: u32 },
+    /// Open or update the task's pull request now (e.g. after an error).
+    Publish { id: u32 },
     /// Send finished work back with a note (awaiting_human → needs_fix).
     Reject { id: u32, note: String },
     /// Stop starting new runs (running agents finish).
@@ -86,8 +98,21 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Run => run_loop(&repo, false).await,
         Cmd::Once => run_loop(&repo, true).await,
         Cmd::Status => status(&repo),
+        Cmd::Watch { id, from_start } => watch::run(&repo, id, from_start),
         Cmd::Approve { ids } => approve(&repo, &ids),
         Cmd::Accept { id } => accept(&repo, id),
+        Cmd::Publish { id } => {
+            let config = Config::load(&repo)?;
+            let mut t = task::find(&repo, id)?;
+            if t.meta.status != Status::AwaitingHuman {
+                bail!("#{id} is {}, not awaiting_human", t.meta.status.as_str());
+            }
+            let url = pr::publish(&repo, &config, &mut t, &pr::Review::default())?;
+            t.log(&format!("pull request: {url}"));
+            t.save()?;
+            println!("#{id}: {url}");
+            Ok(())
+        }
         Cmd::Reject { id, note } => reject(&repo, id, &note),
         Cmd::Pause => state::set_flag(&repo, "PAUSE", true),
         Cmd::Resume => {
@@ -138,6 +163,10 @@ type Finished = (Action, Outcome, PathBuf);
 async fn run_loop(repo: &Path, once: bool) -> anyhow::Result<()> {
     let _lock = acquire_lock(repo)?;
     state::set_flag(repo, "STOP", false)?;
+    // Agents of a previous devloop process aren't tracked by this one; clear stale entries.
+    let mut fresh = state::load_state(repo);
+    fresh.running.clear();
+    state::save_state(repo, &fresh)?;
     log(&format!("devloop started for {}", repo.display()));
     let mut running: JoinSet<Finished> = JoinSet::new();
     let mut busy: HashSet<u32> = HashSet::new();
@@ -269,7 +298,11 @@ fn start_work(
     planner_running: &mut bool,
     runs: &mut Vec<state::Running>,
 ) -> anyhow::Result<usize> {
-    let mut tasks = task::load_all(repo)?;
+    let (mut tasks, invalid) = task::load_checked(repo)?;
+    report_invalid(&invalid);
+    if config.pull_requests {
+        sync_prs(repo, config, &mut tasks)?;
+    }
 
     for id in schedule::exhausted(&tasks, config.max_fix_attempts) {
         if let Some(t) = tasks.iter_mut().find(|t| t.meta.id == id) {
@@ -330,15 +363,17 @@ fn start_work(
             *planner_running = true;
         }
         log(&format!("starting {} for {}", action.role(), target_of(&action)));
+        let log_path = state::run_log_path(repo, &state::run_target(action.task_id()), action.role());
         runs.push(state::Running {
             role: action.role().into(),
             target: target_of(&action),
             started_at: Utc::now(),
+            stream: Some(state::stream_path(&log_path)),
         });
         let (repo, config, action2) = (repo.to_path_buf(), config.clone(), action.clone());
         running.spawn(async move {
             let (outcome, path) =
-                runner::run_agent(&repo, &config, &action2, &cwd, task_path.as_deref()).await;
+                runner::run_agent(&repo, &config, &action2, &cwd, task_path.as_deref(), log_path).await;
             (action2, outcome, path)
         });
         started += 1;
@@ -411,8 +446,11 @@ fn apply_outcome(
         Action::Review(_) => &[Status::AwaitingHuman, Status::NeedsFix, Status::Blocked],
         _ => &[Status::AgentReview, Status::Blocked],
     };
+    let mut review = None;
     match outcome {
         Outcome::Reported { reported, .. } => {
+            review =
+                Some(pr::Review { summary: reported.summary.clone(), findings: reported.findings.clone() });
             let wanted =
                 serde_yaml::from_str::<Status>(&reported.status).ok().filter(|s| allowed.contains(s));
             let status = wanted.unwrap_or(Status::Blocked);
@@ -445,6 +483,10 @@ fn apply_outcome(
         Outcome::UsageLimit { .. } => unreachable!(),
     }
     t.save()?;
+    if t.meta.status == Status::AwaitingHuman && config.pull_requests {
+        publish_or_report(repo, config, &mut t, &review.unwrap_or_default())?;
+        return Ok(());
+    }
     match t.meta.status {
         Status::AwaitingHuman => {
             runner::notify(&format!("Task #{id} is ready for your review: {}", t.meta.title))
@@ -452,7 +494,114 @@ fn apply_outcome(
         Status::Blocked => runner::notify(&format!("Task #{id} is blocked: {}", t.meta.title)),
         _ => {}
     }
-    let _ = config;
+    Ok(())
+}
+
+/// Log unreadable task files every cycle; notify once per file version.
+fn report_invalid(invalid: &[task::Invalid]) {
+    static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    for bad in invalid {
+        let name = bad.path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
+        log(&format!("skipping unreadable task file {name}: {}", bad.error.replace('\n', " ")));
+        let mtime = std::fs::metadata(&bad.path).and_then(|m| m.modified()).ok();
+        let key = format!("{}@{mtime:?}", bad.path.display());
+        let mut seen = SEEN.lock().unwrap_or_else(|p| p.into_inner());
+        if !seen.contains(&key) {
+            seen.push(key);
+            runner::notify(&format!("Task file {name} can't be read; it's skipped until fixed"));
+        }
+    }
+}
+
+// ---- pull requests ----------------------------------------------------------------------
+
+/// Open or update the PR for a reviewed task; failing checks send it back to the fixer.
+fn publish_or_report(
+    repo: &Path,
+    config: &Config,
+    t: &mut task::Task,
+    review: &pr::Review,
+) -> anyhow::Result<()> {
+    let id = t.meta.id;
+    match pr::publish(repo, config, t, review) {
+        Ok(url) => {
+            t.log(&format!("pull request ready: {url}"));
+            t.save()?;
+            runner::notify(&format!("Task #{id} has a pull request to review: {}", t.meta.title));
+        }
+        Err(e) if e.to_string().contains("not publishing") => {
+            t.meta.status = Status::NeedsFix;
+            t.log(&format!("checks failed before opening the PR: {e:#}"));
+            t.save()?;
+        }
+        Err(e) => {
+            t.log(&format!("could not open the pull request: {e:#} (retry: devloop publish {id})"));
+            t.save()?;
+            runner::notify(&format!("Task #{id}: could not open its pull request"));
+        }
+    }
+    Ok(())
+}
+
+static OWNER: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+/// Follow open PRs: merged → done, closed → blocked, owner feedback → needs_fix.
+fn sync_prs(repo: &Path, config: &Config, tasks: &mut [task::Task]) -> anyhow::Result<()> {
+    if !tasks.iter().any(|t| t.meta.pr.is_some() && t.meta.status == Status::AwaitingHuman) {
+        return Ok(());
+    }
+    let owner = OWNER.get_or_init(|| match pr::owner_login(repo, config) {
+        Ok(login) => Some(login),
+        Err(e) => {
+            log(&format!("cannot read the GitHub login (is `gh auth login` done?): {e:#}"));
+            None
+        }
+    });
+    let Some(owner) = owner else { return Ok(()) };
+    for t in tasks.iter_mut().filter(|t| t.meta.pr.is_some() && t.meta.status == Status::AwaitingHuman) {
+        match pr::check(repo, config, t, owner) {
+            Ok(pr::Change::None) => {}
+            Ok(pr::Change::Merged) => finish_merged(repo, config, t)?,
+            Ok(pr::Change::Closed) => {
+                t.meta.status = Status::Blocked;
+                t.log("pull request was closed without merging");
+                t.save()?;
+                runner::notify(&format!("Task #{}: pull request closed", t.meta.id));
+            }
+            Ok(pr::Change::Feedback(items)) => {
+                t.meta.status = Status::NeedsFix;
+                t.meta.attempts = 0;
+                t.meta.pr_synced_at = items.last().map(|f| f.at);
+                let mut entry = "sent back by you on the pull request:".to_string();
+                for f in &items {
+                    entry.push_str(&format!("\n  - [{}] {}", f.kind, f.body.replace('\n', " ")));
+                }
+                t.log(&entry);
+                t.save()?;
+                log(&format!("#{}: {} PR comment(s) → needs_fix", t.meta.id, items.len()));
+            }
+            Err(e) => log(&format!("#{}: could not read its pull request: {e:#}", t.meta.id)),
+        }
+    }
+    Ok(())
+}
+
+/// A task's PR was merged: mark done, remove its worktree, fast-forward the main checkout.
+fn finish_merged(repo: &Path, config: &Config, t: &mut task::Task) -> anyhow::Result<()> {
+    t.meta.status = Status::Done;
+    t.log("pull request merged");
+    t.save()?;
+    let worktree = runner::worktree_path(repo, config, t);
+    if worktree.exists() {
+        let _ = runner::git(repo, &["worktree", "remove", "--force", &worktree.to_string_lossy()]);
+    }
+    if runner::git(repo, &["rev-parse", "--abbrev-ref", "HEAD"]).ok().as_deref()
+        == Some(config.base_branch.as_str())
+        && let Err(e) = runner::git(repo, &["pull", "-q", "--ff-only", &config.remote, &config.base_branch])
+    {
+        log(&format!("could not fast-forward {}: {e:#}", config.base_branch));
+    }
+    runner::notify(&format!("Task #{} merged: {}", t.meta.id, t.meta.title));
     Ok(())
 }
 
@@ -460,7 +609,7 @@ fn apply_outcome(
 
 fn status(repo: &Path) -> anyhow::Result<()> {
     let config = Config::load(repo)?;
-    let tasks = task::load_all(repo)?;
+    let (tasks, invalid) = task::load_checked(repo)?;
     let s = state::load_state(repo);
     let today = state::load_usage(repo, &state::today());
     println!(
@@ -523,6 +672,9 @@ fn status(repo: &Path) -> anyhow::Result<()> {
     if tasks.is_empty() {
         println!("(no tasks yet; the planner proposes tasks for {})", config.current_milestone);
     }
+    for bad in &invalid {
+        println!("unreadable: {} — {}", bad.path.display(), bad.error.replace('\n', " "));
+    }
     Ok(())
 }
 
@@ -559,6 +711,12 @@ fn accept(repo: &Path, id: u32) -> anyhow::Result<()> {
     let mut t = task::find(repo, id)?;
     if t.meta.status != Status::AwaitingHuman {
         bail!("#{id} is {}, not awaiting_human", t.meta.status.as_str());
+    }
+    if let Some(url) = t.meta.pr.clone() {
+        pr::merge(repo, &config, &url)?;
+        finish_merged(repo, &config, &mut t)?;
+        println!("#{id}: merged {url}");
+        return Ok(());
     }
     let branch = t.meta.branch.clone().context("task has no branch")?;
     let current = runner::git(repo, &["rev-parse", "--abbrev-ref", "HEAD"])?;

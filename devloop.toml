@@ -16,3 +16,10 @@ run_timeout_minutes = 60
 max_fix_attempts = 3
 poll_seconds = 120
 quiet_hours = []               # e.g. ["09:00-17:00"]: no new runs during these local times
+
+# Pull requests (docs/DEVELOPMENT.md §3a). devloop pushes reviewed task branches and opens PRs
+# with the agent's description and validation screenshots; agents never push.
+pull_requests = false          # turn on once `main` is on GitHub and `gh auth status` is fine
+remote = "origin"
+assets_branch = "devloop-assets"   # where screenshots are stored so PRs can show them
+gh_bin = "gh"
