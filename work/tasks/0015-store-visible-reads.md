@@ -3,11 +3,19 @@ id: 15
 title: Visibility-filtered read paths (entities, relations, events, audit log)
 milestone: M1
 status: proposed
-depends_on: [14, 4, 7]
+depends_on:
+- 14
+- 4
+- 7
 size: M
-area: [server/crates/store]
+area:
+- server/crates/store
 attempts: 0
 branch: null
+issue: 15
+issue_synced_at: 2026-11-19T23:10:33.518080Z
+issue_body_hash: f6864215d1e1d94f
+issue_status: proposed
 ---
 
 ## Goal
@@ -40,3 +48,4 @@ memory (cap rows, report truncation). Text written by people stays plain data he
 (`user_text`) is M2.
 
 ## Log
+- 2026-11-19 18:10 — issue #15 opened

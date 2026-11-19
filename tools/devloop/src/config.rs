@@ -25,6 +25,8 @@ pub struct Config {
     pub quiet_hours: Vec<String>,
     /// Open pull requests for reviewed tasks (devloop pushes; agents never do).
     pub pull_requests: bool,
+    /// Mirror tasks to GitHub issues; approve, edit, comment and drop tasks there.
+    pub issues: bool,
     pub remote: String,
     pub assets_branch: String,
     pub gh_bin: String,
@@ -48,6 +50,7 @@ impl Default for Config {
             poll_seconds: 120,
             quiet_hours: Vec::new(),
             pull_requests: false,
+            issues: false,
             remote: "origin".into(),
             assets_branch: "devloop-assets".into(),
             gh_bin: "gh".into(),

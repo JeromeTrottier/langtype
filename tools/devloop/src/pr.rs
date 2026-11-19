@@ -74,6 +74,9 @@ pub fn compose_body(
     if let Some(criteria) = section(&task.body, "Acceptance criteria") {
         body.push_str(&format!("\n## Acceptance criteria (task #{})\n\n{criteria}\n", task.meta.id));
     }
+    if let Some(issue) = task.meta.issue {
+        body.push_str(&format!("\nCloses #{issue}\n"));
+    }
     body.push_str(&format!(
         "\n---\nTask #{} · {} · branch `{}`\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n{OWN_MARKER}\n",
         task.meta.id,

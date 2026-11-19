@@ -5,9 +5,15 @@ milestone: M1
 status: proposed
 depends_on: []
 size: M
-area: [server/crates/core, server/crates/kits]
+area:
+- server/crates/core
+- server/crates/kits
 attempts: 0
 branch: null
+issue: 1
+issue_synced_at: 2026-11-19T23:09:36.650080Z
+issue_body_hash: b81d09109e3ac29f
+issue_status: proposed
 ---
 
 ## Goal
@@ -42,3 +48,4 @@ Add `RelationId`, `EventId` (exists), `ActivityRunId`, `ConnectionId` id types a
 No I/O in core. Out of scope: validation of entity data (0003), visibility logic (0004).
 
 ## Log
+- 2026-11-19 18:09 — issue #1 opened

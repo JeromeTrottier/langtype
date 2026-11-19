@@ -3,11 +3,18 @@ id: 19
 title: Minimal `counters` engine for the test kit
 milestone: M1
 status: proposed
-depends_on: [17, 9]
+depends_on:
+- 17
+- 9
 size: S
-area: [server/crates/engines]
+area:
+- server/crates/engines
 attempts: 0
 branch: null
+issue: 19
+issue_synced_at: 2026-11-19T23:10:50.399879Z
+issue_body_hash: 3b564fae8acc5c1b
+issue_status: proposed
 ---
 
 ## Goal
@@ -35,3 +42,4 @@ can grow from this. Labels in signals are kit-provided or neutral ("{n} below ta
 English product words baked into the engine beyond a default.
 
 ## Log
+- 2026-11-19 18:10 — issue #19 opened

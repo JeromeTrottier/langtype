@@ -3,11 +3,17 @@ id: 16
 title: Compile the safe CEL subset of filters to SQL
 milestone: M1
 status: proposed
-depends_on: [15]
+depends_on:
+- 15
 size: M
-area: [server/crates/store]
+area:
+- server/crates/store
 attempts: 0
 branch: null
+issue: 16
+issue_synced_at: 2026-11-19T23:10:37.669604Z
+issue_body_hash: d94e25fbe2a01325
+issue_status: proposed
 ---
 
 ## Goal
@@ -33,3 +39,4 @@ Use only portable SQL plus `json_extract` behind one helper so the Postgres vers
 (store CLAUDE.md). Field names come from the kit, but still validate them against the type's fields.
 
 ## Log
+- 2026-11-19 18:10 — issue #16 opened

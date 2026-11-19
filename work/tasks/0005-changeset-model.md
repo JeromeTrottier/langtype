@@ -3,11 +3,17 @@ id: 5
 title: Changeset model, revert planning and conflict rules in core
 milestone: M1
 status: proposed
-depends_on: [1]
+depends_on:
+- 1
 size: M
-area: [server/crates/core/src/changeset.rs]
+area:
+- server/crates/core/src/changeset.rs
 attempts: 0
 branch: null
+issue: 5
+issue_synced_at: 2026-11-19T23:09:52.988374Z
+issue_body_hash: d3faa50d33585461
+issue_status: proposed
 ---
 
 ## Goal
@@ -36,3 +42,4 @@ Drafts (status `draft`, apply re-checks versions) are M2; keep the status enum c
 implement draft application here. Out of scope: storage (0012, 0014).
 
 ## Log
+- 2026-11-19 18:09 — issue #5 opened

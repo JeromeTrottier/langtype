@@ -3,11 +3,17 @@ id: 4
 title: Visibility and edit rules in core
 milestone: M1
 status: proposed
-depends_on: [1]
+depends_on:
+- 1
 size: M
-area: [server/crates/core/src/visibility.rs]
+area:
+- server/crates/core/src/visibility.rs
 attempts: 0
 branch: null
+issue: 4
+issue_synced_at: 2026-11-19T23:09:49.548345Z
+issue_body_hash: af4b91fd2129f2a0
+issue_status: proposed
 ---
 
 ## Goal
@@ -38,3 +44,4 @@ An agent viewer is the member's viewer intersected with connection scopes (read-
 with the `_test` kit files (no I/O in core).
 
 ## Log
+- 2026-11-19 18:09 — issue #4 opened

@@ -19,7 +19,8 @@ quiet_hours = []               # e.g. ["09:00-17:00"]: no new runs during these 
 
 # Pull requests (docs/DEVELOPMENT.md §3a). devloop pushes reviewed task branches and opens PRs
 # with the agent's description and validation screenshots; agents never push.
-pull_requests = false          # turn on once `main` is on GitHub and `gh auth status` is fine
+pull_requests = true           # devloop opens a PR when the reviewer agent approves a task
+issues = true                  # one GitHub issue per task: approve with the `approved` label
 remote = "origin"
 assets_branch = "devloop-assets"   # where screenshots are stored so PRs can show them
 gh_bin = "gh"

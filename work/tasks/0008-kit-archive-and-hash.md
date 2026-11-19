@@ -3,11 +3,18 @@ id: 8
 title: Kit archive format, file hashes and `kit pack`
 milestone: M1
 status: proposed
-depends_on: [6]
+depends_on:
+- 6
 size: M
-area: [server/crates/kits, server/crates/cli]
+area:
+- server/crates/kits
+- server/crates/cli
 attempts: 0
 branch: null
+issue: 8
+issue_synced_at: 2026-11-19T23:10:04.693668Z
+issue_body_hash: 15bf844a9d093214
+issue_status: proposed
 ---
 
 ## Goal
@@ -35,3 +42,4 @@ Libraries are a second package type but are out of scope here (M3). Signing is M
 dependencies small (`sha2`, `tar`, `flate2`).
 
 ## Log
+- 2026-11-19 18:10 — issue #8 opened

@@ -3,11 +3,17 @@ id: 3
 title: Validate and normalise entity data and event payloads
 milestone: M1
 status: proposed
-depends_on: [1]
+depends_on:
+- 1
 size: M
-area: [server/crates/core/src/validate.rs]
+area:
+- server/crates/core/src/validate.rs
 attempts: 0
 branch: null
+issue: 3
+issue_synced_at: 2026-11-19T23:09:44.671446Z
+issue_body_hash: c709726599b4b6d9
+issue_status: proposed
 ---
 
 ## Goal
@@ -35,3 +41,4 @@ returning normalised data, and the same for event payloads and KB settings (DOMA
 Pure functions, no I/O. Errors via `thiserror`. Out of scope: visibility of fields (0004).
 
 ## Log
+- 2026-11-19 18:09 — issue #3 opened

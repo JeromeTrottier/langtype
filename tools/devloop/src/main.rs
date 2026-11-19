@@ -2,6 +2,7 @@
 //! See docs/DEVELOPMENT.md.
 
 mod config;
+mod issues;
 mod launchd;
 mod outcome;
 mod pr;
@@ -300,6 +301,11 @@ fn start_work(
 ) -> anyhow::Result<usize> {
     let (mut tasks, invalid) = task::load_checked(repo)?;
     report_invalid(&invalid);
+    if config.issues
+        && let Err(e) = sync_issues(repo, config, &mut tasks)
+    {
+        log(&format!("issue sync failed: {e:#}"));
+    }
     if config.pull_requests {
         sync_prs(repo, config, &mut tasks)?;
     }
@@ -545,19 +551,157 @@ fn publish_or_report(
 
 static OWNER: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
 
+fn owner(repo: &Path, config: &Config) -> Option<&'static str> {
+    OWNER
+        .get_or_init(|| match pr::owner_login(repo, config) {
+            Ok(login) => Some(login),
+            Err(e) => {
+                log(&format!("cannot read the GitHub login (is `gh auth login` done?): {e:#}"));
+                None
+            }
+        })
+        .as_deref()
+}
+
+/// Mirror tasks to GitHub issues and apply your actions there (docs/DEVELOPMENT.md §3b).
+fn sync_issues(repo: &Path, config: &Config, tasks: &mut [task::Task]) -> anyhow::Result<()> {
+    use std::collections::HashMap;
+    static SETUP: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    let Some(owner) = owner(repo, config) else { return Ok(()) };
+    let slug = issues::slug(repo, config)?;
+
+    let mut milestones: Vec<String> = tasks.iter().map(|t| t.meta.milestone.clone()).collect();
+    milestones.sort();
+    milestones.dedup();
+    for m in milestones {
+        let mut done = SETUP.lock().unwrap_or_else(|p| p.into_inner());
+        if !done.contains(&m) {
+            issues::ensure_setup(repo, config, &slug, &m)?;
+            done.push(m);
+        }
+    }
+
+    let snaps: HashMap<u64, issues::Snapshot> =
+        issues::list(repo, config, &slug)?.into_iter().map(|s| (s.number, s)).collect();
+    let mut issue_of: HashMap<u32, u64> =
+        tasks.iter().filter_map(|t| t.meta.issue.map(|n| (t.meta.id, n))).collect();
+
+    for t in tasks.iter_mut() {
+        if t.meta.issue.is_some() || matches!(t.meta.status, Status::Done | Status::Cancelled) {
+            continue;
+        }
+        let body = issues::issue_body(t, &issue_of);
+        let number = issues::create(repo, config, &slug, t, &body)?;
+        t.meta.issue = Some(number);
+        t.meta.issue_body_hash = Some(issues::body_hash(&body));
+        t.meta.issue_status = Some(t.meta.status);
+        t.meta.issue_synced_at = Some(Utc::now());
+        t.log(&format!("issue #{number} opened"));
+        t.save()?;
+        issue_of.insert(t.meta.id, number);
+        log(&format!("#{}: opened issue #{number}", t.meta.id));
+    }
+
+    for t in tasks.iter_mut() {
+        let Some(number) = t.meta.issue else { continue };
+        let Some(snap) = snaps.get(&number) else { continue };
+        let mut changed = false;
+
+        if t.meta.issue_synced_at.is_none_or(|s| snap.updated_at > s) {
+            let events = issues::events(repo, config, &slug, number)?;
+            let comments = issues::comments(repo, config, &slug, number)?;
+            let d = issues::decide(t, snap, &events, &comments, owner);
+            if let Some(body) = &d.edited {
+                t.body = issues::apply_edited_sections(&t.body, body);
+                t.meta.issue_body_hash = Some(issues::body_hash(body));
+                t.log("goal / criteria / notes updated from your edit of the issue");
+            }
+            if d.late_edit {
+                t.meta.issue_body_hash = Some(issues::body_hash(&snap.body));
+                issues::comment(
+                    repo,
+                    config,
+                    &slug,
+                    number,
+                    "Work on this task has started, so edits to the issue text aren't applied. Add a comment instead; agents read comments as notes.",
+                )?;
+            }
+            if d.approve {
+                t.meta.status = Status::Ready;
+                t.log("approved on GitHub");
+            }
+            for note in &d.notes {
+                t.log(&format!("note from you on issue #{number}: {}", note.replace('\n', " ")));
+            }
+            if !d.notes.is_empty() && t.meta.status == Status::Blocked {
+                t.meta.status = if t.meta.branch.is_some() { Status::NeedsFix } else { Status::Ready };
+                t.meta.attempts = 0;
+                t.log("unblocked by your answer on the issue");
+            }
+            if d.cancel {
+                t.meta.status = Status::Cancelled;
+                t.log("cancelled: you closed the issue");
+            }
+            t.meta.issue_synced_at = Some(Utc::now());
+            changed = true;
+        }
+
+        let label = issues::status_label(t.meta.status);
+        if t.meta.issue_status != Some(t.meta.status) || !snap.labels.iter().any(|l| l == label) {
+            issues::set_status(repo, config, &slug, number, &snap.labels, t.meta.status)?;
+            if t.meta.issue_status != Some(t.meta.status) {
+                match t.meta.status {
+                    Status::Blocked => {
+                        let last = t
+                            .body
+                            .lines()
+                            .rev()
+                            .find(|l| l.starts_with("- "))
+                            .unwrap_or("")
+                            .trim_start_matches("- ");
+                        issues::comment(
+                            repo,
+                            config,
+                            &slug,
+                            number,
+                            &format!("**Blocked.** {last}\n\nReply here to unblock it."),
+                        )?;
+                    }
+                    Status::AwaitingHuman => {
+                        if let Some(pr_url) = &t.meta.pr {
+                            issues::comment(
+                                repo,
+                                config,
+                                &slug,
+                                number,
+                                &format!("Pull request ready for your review: {pr_url}"),
+                            )?;
+                        }
+                    }
+                    Status::Done if snap.open => issues::close(repo, config, &slug, number, "completed")?,
+                    Status::Cancelled if snap.open => {
+                        issues::close(repo, config, &slug, number, "not planned")?
+                    }
+                    _ => {}
+                }
+            }
+            t.meta.issue_status = Some(t.meta.status);
+            t.meta.issue_synced_at = Some(Utc::now());
+            changed = true;
+        }
+        if changed {
+            t.save()?;
+        }
+    }
+    Ok(())
+}
+
 /// Follow open PRs: merged → done, closed → blocked, owner feedback → needs_fix.
 fn sync_prs(repo: &Path, config: &Config, tasks: &mut [task::Task]) -> anyhow::Result<()> {
     if !tasks.iter().any(|t| t.meta.pr.is_some() && t.meta.status == Status::AwaitingHuman) {
         return Ok(());
     }
-    let owner = OWNER.get_or_init(|| match pr::owner_login(repo, config) {
-        Ok(login) => Some(login),
-        Err(e) => {
-            log(&format!("cannot read the GitHub login (is `gh auth login` done?): {e:#}"));
-            None
-        }
-    });
-    let Some(owner) = owner else { return Ok(()) };
+    let Some(owner) = owner(repo, config) else { return Ok(()) };
     for t in tasks.iter_mut().filter(|t| t.meta.pr.is_some() && t.meta.status == Status::AwaitingHuman) {
         match pr::check(repo, config, t, owner) {
             Ok(pr::Change::None) => {}

@@ -3,11 +3,18 @@ id: 22
 title: REST API for entities, relations, events, audit log and undo
 milestone: M1
 status: proposed
-depends_on: [20]
+depends_on:
+- 20
 size: M
-area: [server/crates/api, client/src/api/types.gen.ts]
+area:
+- server/crates/api
+- client/src/api/types.gen.ts
 attempts: 0
 branch: null
+issue: 22
+issue_synced_at: 2026-11-19T23:11:03.197756Z
+issue_body_hash: d683519b471531b7
+issue_status: proposed
 ---
 
 ## Goal
@@ -35,3 +42,4 @@ return in M2).
 Activity routes are 0023. Keep responses compact and paged (`limit`, `cursor`) for lists.
 
 ## Log
+- 2026-11-19 18:11 — issue #22 opened

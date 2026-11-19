@@ -15,6 +15,8 @@ pub enum Status {
     AwaitingHuman,
     Done,
     Blocked,
+    /// Dropped (e.g. you closed its GitHub issue). Never scheduled.
+    Cancelled,
 }
 
 impl Status {
@@ -28,6 +30,7 @@ impl Status {
             Status::AwaitingHuman => "awaiting_human",
             Status::Done => "done",
             Status::Blocked => "blocked",
+            Status::Cancelled => "cancelled",
         }
     }
 }
@@ -54,6 +57,18 @@ pub struct Meta {
     /// Last time devloop read the PR's feedback.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pr_synced_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// GitHub issue number mirroring this task.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issue: Option<u64>,
+    /// Last time devloop read the issue's activity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issue_synced_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Hash of the issue body devloop last wrote or accepted (detects your edits).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issue_body_hash: Option<String>,
+    /// Status last mirrored to the issue (labels, comments).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issue_status: Option<Status>,
 }
 
 #[derive(Clone, Debug)]

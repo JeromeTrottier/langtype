@@ -3,11 +3,18 @@ id: 2
 title: Richer test kit and visibility reference checks
 milestone: M1
 status: proposed
-depends_on: [1]
+depends_on:
+- 1
 size: S
-area: [kits/_test, server/crates/kits]
+area:
+- kits/_test
+- server/crates/kits
 attempts: 0
 branch: null
+issue: 2
+issue_synced_at: 2026-11-19T23:09:40.831471Z
+issue_body_hash: edd0f7b036029f79
+issue_status: proposed
 ---
 
 ## Goal
@@ -36,3 +43,4 @@ stop and report `blocked` (schema changes need an ADR). Keep the kit small and g
 RPG/language words) — it's a fixture, not a product kit.
 
 ## Log
+- 2026-11-19 18:09 — issue #2 opened

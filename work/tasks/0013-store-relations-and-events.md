@@ -3,11 +3,18 @@ id: 13
 title: Relations and append-only events in the write path
 milestone: M1
 status: proposed
-depends_on: [12, 4]
+depends_on:
+- 12
+- 4
 size: M
-area: [server/crates/store]
+area:
+- server/crates/store
 attempts: 0
 branch: null
+issue: 13
+issue_synced_at: 2026-11-19T23:10:26.018963Z
+issue_body_hash: fac12af4c4e94c24
+issue_status: proposed
 ---
 
 ## Goal
@@ -35,3 +42,4 @@ Platform event types for M1: `entity_revealed`, `undone`, `activity_completed`. 
 defaults to its subjects' (computed on read, 0015); store an explicit `visibility` only when given.
 
 ## Log
+- 2026-11-19 18:10 — issue #13 opened

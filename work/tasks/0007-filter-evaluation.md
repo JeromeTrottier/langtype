@@ -3,11 +3,19 @@ id: 7
 title: Filter type and in-memory CEL evaluation
 milestone: M1
 status: proposed
-depends_on: [1, 6]
+depends_on:
+- 1
+- 6
 size: M
-area: [server/crates/core/src/filter.rs, server/crates/core/Cargo.toml]
+area:
+- server/crates/core/src/filter.rs
+- server/crates/core/Cargo.toml
 attempts: 0
 branch: null
+issue: 7
+issue_synced_at: 2026-11-19T23:10:00.797272Z
+issue_body_hash: 2bc40245722980e6
+issue_status: proposed
 ---
 
 ## Goal
@@ -35,3 +43,4 @@ and `tts` are out of scope here (rules / presenters later); calling them returns
 "unsupported here" error. Visibility is applied by the caller after filtering (FILTERS.md §2.3).
 
 ## Log
+- 2026-11-19 18:10 — issue #7 opened

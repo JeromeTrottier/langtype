@@ -3,11 +3,17 @@ id: 10
 title: Install kit versions into the store (immutable)
 milestone: M1
 status: proposed
-depends_on: [8]
+depends_on:
+- 8
 size: M
-area: [server/crates/store]
+area:
+- server/crates/store
 attempts: 0
 branch: null
+issue: 10
+issue_synced_at: 2026-11-19T23:10:13.140351Z
+issue_body_hash: 8fc967dd5b6edf32
+issue_status: proposed
 ---
 
 ## Goal
@@ -32,3 +38,4 @@ Store depends on `mnemo-kits` for validation and hashing; keep SQL portable (sto
 No new migration should be needed; if one is, add `0002_*.sql`.
 
 ## Log
+- 2026-11-19 18:10 — issue #10 opened

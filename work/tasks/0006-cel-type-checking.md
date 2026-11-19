@@ -3,11 +3,18 @@ id: 6
 title: Parse and type-check CEL expressions and filters in kit validation
 milestone: M1
 status: proposed
-depends_on: [2]
+depends_on:
+- 2
 size: M
-area: [server/crates/kits, server/Cargo.toml]
+area:
+- server/crates/kits
+- server/Cargo.toml
 attempts: 0
 branch: null
+issue: 6
+issue_synced_at: 2026-11-19T23:09:57.168219Z
+issue_body_hash: f6c48a548cf4cdc8
+issue_status: proposed
 ---
 
 ## Goal
@@ -39,3 +46,4 @@ suggests `cel-interpreter`), add it to the workspace, and add a `kits::cel` chec
 CEL crate choice in the PR description.
 
 ## Log
+- 2026-11-19 18:09 — issue #6 opened

@@ -3,11 +3,18 @@ id: 21
 title: REST API for kits and knowledge bases
 milestone: M1
 status: proposed
-depends_on: [11]
+depends_on:
+- 11
 size: M
-area: [server/crates/api, client/src/api/types.gen.ts]
+area:
+- server/crates/api
+- client/src/api/types.gen.ts
 attempts: 0
 branch: null
+issue: 21
+issue_synced_at: 2026-11-19T23:10:59.077649Z
+issue_body_hash: a37f8bf37d065307
+issue_status: proposed
 ---
 
 ## Goal
@@ -34,3 +41,4 @@ Handlers stay thin (api CLAUDE.md). Error mapping: one `ApiError` → JSON `{ co
 details? }`.
 
 ## Log
+- 2026-11-19 18:10 — issue #21 opened

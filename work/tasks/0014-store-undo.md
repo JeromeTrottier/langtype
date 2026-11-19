@@ -3,11 +3,17 @@ id: 14
 title: Undo a changeset with a reverting changeset
 milestone: M1
 status: proposed
-depends_on: [13]
+depends_on:
+- 13
 size: M
-area: [server/crates/store]
+area:
+- server/crates/store
 attempts: 0
 branch: null
+issue: 14
+issue_synced_at: 2026-11-19T23:10:29.699523Z
+issue_body_hash: 48188a86973e15eb
+issue_status: proposed
 ---
 
 ## Goal
@@ -32,3 +38,4 @@ Engine state changes (0018) must also be revertible; leave a test-backed `engine
 for when 0018 lands, or note it for 0018 to add.
 
 ## Log
+- 2026-11-19 18:10 — issue #14 opened

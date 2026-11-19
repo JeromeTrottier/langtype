@@ -133,6 +133,27 @@ With `pull_requests = true`, a task the reviewer agent approves becomes a GitHub
 
 Requirements: `gh auth login`, the base branch pushed to GitHub, then `pull_requests = true`.
 
+## 3b. Issues: your interface to the queue
+
+With `issues = true`, devloop mirrors every task to a GitHub issue (labelled `devloop`, in the
+task's milestone), so you never need the terminal to steer the work:
+
+| You do on GitHub | devloop does |
+|---|---|
+| Add the **`approved`** label (one at a time, or select several in the issues list) | Task `proposed` → `ready` |
+| **Edit the issue text** before it's started | Copies Goal / Acceptance criteria / Notes into the task |
+| **Comment** | Adds your comment to the task log as a note for the agents; on a **blocked** task, your answer unblocks it |
+| **Close** the issue | Task → `cancelled` |
+| **Merge** the linked PR | PR says `Closes #N`: the issue closes, the task is `done` |
+
+devloop keeps the issue's status label current (`devloop: proposed`, `queued`, `in progress`,
+`your review`, `blocked`, `done`, `cancelled`) and comments when a task is blocked (with the
+question) or when its PR is ready. Label changes follow a status change by one cycle.
+
+Only actions from your account count (checked for labels and closing; body edits and labels are
+limited by GitHub to you and collaborators anyway). Comments from anyone else are ignored. Task
+files in `work/tasks/` stay the agents' working copy; devloop is the only writer of both.
+
 ## 4. Usage limits and budget
 
 - **Usage cap (default 70%):** every run streams `rate_limit_event`s with your account's
@@ -195,7 +216,8 @@ after wake, the next cycle continues. Logs: `.devloop/devloop.log`.
 
 ## 8. Setup
 
-0. For pull requests: `gh auth login`, push `main`, set `pull_requests = true`.
+0. For pull requests and issues: `gh auth login`, push `main`, set `pull_requests = true` and
+   `issues = true`. From then on you approve, edit, answer and review on GitHub.
 1. Install the Claude Code CLI and sign in (`claude` in a terminal), so `claude` is on your PATH.
 2. Install `just` (`brew install just`).
 3. `cargo build -p devloop --release`

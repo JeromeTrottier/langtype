@@ -1,13 +1,21 @@
 ---
 id: 20
-title: "Activity runs: start, idempotent result batches, complete, signals"
+title: 'Activity runs: start, idempotent result batches, complete, signals'
 milestone: M1
 status: proposed
-depends_on: [18, 19]
+depends_on:
+- 18
+- 19
 size: M
-area: [server/crates/api/src/service, server/crates/store]
+area:
+- server/crates/api/src/service
+- server/crates/store
 attempts: 0
 branch: null
+issue: 20
+issue_synced_at: 2026-11-19T23:10:54.334088Z
+issue_body_hash: 85eb08dfac3100da
+issue_status: proposed
 ---
 
 ## Goal
@@ -36,3 +44,4 @@ Assignments are created by `assign_activity` in M8; seed one directly in the tes
 runs (timeout) is out of scope.
 
 ## Log
+- 2026-11-19 18:10 — issue #20 opened

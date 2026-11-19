@@ -3,11 +3,20 @@ id: 18
 title: KB service layer and effect host (validate + apply in one transaction)
 milestone: M1
 status: proposed
-depends_on: [17, 16, 21]
+depends_on:
+- 17
+- 16
+- 21
 size: M
-area: [server/crates/api/src/service, server/crates/store]
+area:
+- server/crates/api/src/service
+- server/crates/store
 attempts: 0
 branch: null
+issue: 18
+issue_synced_at: 2026-11-19T23:10:46.449542Z
+issue_body_hash: 0c942490085fe8fd
+issue_status: proposed
 ---
 
 ## Goal
@@ -39,3 +48,4 @@ PLAN §24 if a crate is added. `Schedule` effects are stored nowhere yet (on_tic
 them with a clear error for now and note it.
 
 ## Log
+- 2026-11-19 18:10 — issue #18 opened

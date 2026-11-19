@@ -3,11 +3,18 @@ id: 12
 title: Entity writes through changesets with optimistic locking
 milestone: M1
 status: proposed
-depends_on: [11, 5]
+depends_on:
+- 11
+- 5
 size: M
-area: [server/crates/store]
+area:
+- server/crates/store
 attempts: 0
 branch: null
+issue: 12
+issue_synced_at: 2026-11-19T23:10:21.030910Z
+issue_body_hash: 231d4a12c82f27e3
+issue_status: proposed
 ---
 
 ## Goal
@@ -38,3 +45,4 @@ its caller but enforces data invariants. Keep the op enum open for relations/eve
 engine state (0018).
 
 ## Log
+- 2026-11-19 18:10 — issue #12 opened

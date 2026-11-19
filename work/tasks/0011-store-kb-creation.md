@@ -3,11 +3,18 @@ id: 11
 title: Create knowledge bases from a kit version
 milestone: M1
 status: proposed
-depends_on: [10, 3]
+depends_on:
+- 10
+- 3
 size: M
-area: [server/crates/store]
+area:
+- server/crates/store
 attempts: 0
 branch: null
+issue: 11
+issue_synced_at: 2026-11-19T23:10:17.230976Z
+issue_body_hash: 6299c918b30de198
+issue_status: proposed
 ---
 
 ## Goal
@@ -35,3 +42,4 @@ Workspace membership is required to create a KB in that workspace (local mode: t
 personal workspace). KB name is NFC-normalised and non-empty.
 
 ## Log
+- 2026-11-19 18:10 — issue #11 opened

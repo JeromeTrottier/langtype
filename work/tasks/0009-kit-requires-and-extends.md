@@ -3,11 +3,18 @@ id: 9
 title: Check `requires` and resolve `extends`
 milestone: M1
 status: proposed
-depends_on: [8]
+depends_on:
+- 8
 size: M
-area: [server/crates/kits, server/crates/cli]
+area:
+- server/crates/kits
+- server/crates/cli
 attempts: 0
 branch: null
+issue: 9
+issue_synced_at: 2026-11-19T23:10:08.787537Z
+issue_body_hash: 21dd32dbc7e0bb54
+issue_status: proposed
 ---
 
 ## Goal
@@ -35,3 +42,4 @@ use it without a dependency cycle (e.g. a const in `core`), and say so in the PR
 resolution (`requires.libraries`) stays a declaration check until M3.
 
 ## Log
+- 2026-11-19 18:10 — issue #9 opened

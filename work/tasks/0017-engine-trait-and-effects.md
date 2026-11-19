@@ -3,11 +3,17 @@ id: 17
 title: Engine trait, effects and deterministic context
 milestone: M1
 status: proposed
-depends_on: [1]
+depends_on:
+- 1
 size: M
-area: [server/crates/engines]
+area:
+- server/crates/engines
 attempts: 0
 branch: null
+issue: 17
+issue_synced_at: 2026-11-19T23:10:41.743717Z
+issue_body_hash: 931eb7fa606e3eac
+issue_status: proposed
 ---
 
 ## Goal
@@ -37,3 +43,4 @@ validates them. If the trait shape differs from DOMAIN_MODEL §11, update that s
 change.
 
 ## Log
+- 2026-11-19 18:10 — issue #17 opened
