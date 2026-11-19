@@ -43,7 +43,10 @@ id_type!(UserId);
 id_type!(WorkspaceId);
 id_type!(KbId);
 id_type!(EntityId);
+id_type!(RelationId);
 id_type!(EventId);
+id_type!(ActivityRunId);
+id_type!(ConnectionId);
 id_type!(ChangesetId);
 id_type!(SessionId);
 

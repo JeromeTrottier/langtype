@@ -103,7 +103,7 @@ A kit is **immutable once a version is published**. Everything below belongs to 
 | **KitVersion** | `kit_id`, `version` (semver), `sha256`, `requires`, `extends?`, `license`, `yanked`, `manifest` |
 | **RoleDef** | `id`, `name`, `description` (e.g. `gm`, `player`, `learner`; `owner` is implicit) |
 | **EntityTypeDef** | `id`, `fields: [FieldDef]`, `visibility: VisibilityPolicy`, `editable_by: [RoleId \| "owner"]`, `display` (title field, icon), `lifecycle?: note \| thread`, `dedupe_on?` (fields used for duplicate checks, default: title) |
-| **FieldDef** | `name`, `type` (`text`, `markdown`, `int`, `float`, `bool`, `date`, `enum[…]`, `ref(type)`, `list(T)`, `object{…}`), `required`, `default`, `visibility?` (field-level) |
+| **FieldDef** | `name`, `type` (`text`, `markdown`, `int`, `float`, `bool`, `date`, `timestamp`, `json`, `enum[…]`, `ref(type)`, `list(T)`; `object{…}` not yet supported), `required`, `default`, `visibility?` (field-level) |
 | **RelationTypeDef** | `id`, `from_type`, `to_type`, `cardinality` (e.g. `npc —member_of→ faction`) |
 | **EventTypeDef** | `id`, `payload_schema`, `class: story \| evidence \| bookkeeping`, `visibility?` |
 | **EngineBinding** | `engine` (built-in id or kit engine), `version_req`, `config` (validated by the engine's `config_schema`) |
